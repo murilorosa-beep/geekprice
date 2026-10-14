@@ -443,12 +443,44 @@ export const syncRuns = pgTable("sync_runs", {
   status: syncStatus("status").default("running").notNull(), source: varchar("source", { length: 40 }).notNull(), cursorBefore: text("cursor_before"), cursorAfter: text("cursor_after"), createdCount: integer("created_count").default(0).notNull(), updatedCount: integer("updated_count").default(0).notNull(), skippedCount: integer("skipped_count").default(0).notNull(), conflictCount: integer("conflict_count").default(0).notNull(), errorCount: integer("error_count").default(0).notNull(), errors: jsonb("errors").$type<Array<Record<string, unknown>>>().default([]).notNull(), startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(), completedAt: timestamp("completed_at", { withTimezone: true }),
 }, (table) => [index("sync_runs_org_started_idx").on(table.organizationId, table.startedAt), index("sync_runs_connection_idx").on(table.connectionId)]).enableRLS();
 
+export const commercePreviews = pgTable("commerce_previews", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").references(() => organizations.id, { onDelete: "cascade" }).notNull(),
+  connectionId: uuid("connection_id").references(() => integrationConnections.id, { onDelete: "cascade" }).notNull(),
+  createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+  payloadHash: varchar("payload_hash", { length: 64 }).notNull(),
+  snapshot: jsonb("snapshot").$type<import("@/server/commerce/types").ReconciledItem[]>().notNull(),
+  status: varchar("status", { length: 20 }).default("pending").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  importRunId: uuid("import_run_id").references(() => syncRuns.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index("commerce_previews_org_idx").on(table.organizationId, table.createdAt)]).enableRLS();
+
+export const autopilotWorkerState = pgTable("autopilot_worker_state", {
+  id: integer("id").primaryKey(),
+  runId: uuid("run_id").defaultRandom().notNull(),
+  organizationId: uuid("organization_id").references(() => organizations.id, { onDelete: "set null" }),
+  channel: varchar("channel", { length: 20 }),
+  lastItemId: uuid("last_item_id"),
+  status: varchar("status", { length: 20 }).default("idle").notNull(),
+  workerId: uuid("worker_id"),
+  fencingVersion: integer("fencing_version").default(0).notNull(),
+  attempts: integer("attempts").default(0).notNull(),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
+  leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+  errorSummary: text("error_summary"),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+}).enableRLS();
+
 export const externalProductMappings = pgTable("external_product_mappings", {
   id: uuid("id").defaultRandom().primaryKey(), organizationId: uuid("organization_id").references(() => organizations.id, { onDelete: "cascade" }).notNull(), connectionId: uuid("connection_id").notNull(), inventoryItemId: uuid("inventory_item_id").notNull(), externalId: varchar("external_id", { length: 180 }).notNull(), externalVariantId: varchar("external_variant_id", { length: 180 }), sourceUpdatedAt: timestamp("source_updated_at", { withTimezone: true }), sourceVersion: varchar("source_version", { length: 180 }), lastImportedHash: varchar("last_imported_hash", { length: 64 }), ...timestamps,
 }, (table) => [foreignKey({ name: "external_product_mappings_connection_id_integration_connections", columns: [table.connectionId], foreignColumns: [integrationConnections.id] }).onDelete("cascade"), foreignKey({ name: "external_product_mappings_inventory_item_id_inventory_items_id_", columns: [table.inventoryItemId], foreignColumns: [inventoryItems.id] }).onDelete("cascade"), uniqueIndex("external_mapping_connection_external_uidx").on(table.connectionId, table.externalId, table.externalVariantId), uniqueIndex("external_mapping_connection_inventory_uidx").on(table.connectionId, table.inventoryItemId), index("external_mapping_org_idx").on(table.organizationId)]).enableRLS();
 
 export const priceChangeBatches = pgTable("price_change_batches", {
   id: uuid("id").defaultRandom().primaryKey(),
+  idempotencyKey: varchar("idempotency_key", { length: 180 }),
   organizationId: uuid("organization_id").references(() => organizations.id, { onDelete: "cascade" }).notNull(),
   createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
   source: varchar("source", { length: 40 }).default("manual_bulk_approve").notNull(),
@@ -462,6 +494,7 @@ export const priceChangeBatches = pgTable("price_change_batches", {
   notes: text("notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
+  uniqueIndex("price_batches_org_idempotency_uidx").on(table.organizationId, table.idempotencyKey),
   index("price_change_batches_org_idx").on(table.organizationId, table.createdAt),
 ]).enableRLS();
 

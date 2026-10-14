@@ -403,6 +403,8 @@ export async function applyPriceBatch(
   userId: string | null,
   input: z.infer<typeof applyBatchInputSchema> & {
     source?: "manual_bulk_approve" | "single_approve" | "autopilot_auto";
+    idempotencyKey?: string;
+    workerFence?: { workerId: string; version: number };
   }
 ) {
   if (input.channel !== "counter") {
@@ -434,6 +436,20 @@ export async function applyPriceBatch(
   }
 
   return db.transaction(async (tx) => {
+    if (input.workerFence) {
+      const fence = await tx.execute(sql`select id from autopilot_worker_state
+        where id = 1 and worker_id = ${input.workerFence.workerId}::uuid
+          and fencing_version = ${input.workerFence.version}
+          and lease_expires_at > now() for update`);
+      if (fence.length !== 1) throw new AutopilotConflictError("Lease do worker perdido; alteração bloqueada.");
+    }
+    if (input.idempotencyKey) {
+      const [existing] = await tx.select().from(priceChangeBatches).where(and(
+        eq(priceChangeBatches.organizationId, organizationId),
+        eq(priceChangeBatches.idempotencyKey, input.idempotencyKey),
+      )).limit(1);
+      if (existing) return { success: true, message: "Lote já aplicado anteriormente.", batch: existing };
+    }
     let totalBefore = new Decimal(0);
     let totalAfter = new Decimal(0);
 
@@ -446,6 +462,7 @@ export async function applyPriceBatch(
       .insert(priceChangeBatches)
       .values({
         organizationId,
+        idempotencyKey: input.idempotencyKey ?? null,
         createdById: userId,
         source: input.source ?? "manual_bulk_approve",
         channel: input.channel,

@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     const preview = await generateCommerceImportPreview(ctx.organizationId, input.connectionId, {
       page: input.page,
       perPage: input.perPage,
-    });
+    }, ctx.userId);
 
     return Response.json(preview, { status: 200 });
   } catch (error) {

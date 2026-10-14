@@ -1,9 +1,19 @@
-import { beforeAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import { spawnSync } from "node:child_process";
+import { safeWooGet } from "@/server/commerce/safe-request";
+
+vi.mock("@/server/commerce/safe-request", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/commerce/safe-request")>();
+  return { ...actual, safeWooGet: vi.fn() };
+});
+import { and, eq, like } from "drizzle-orm";
 import { db } from "@/db";
 import {
   externalProductMappings,
   integrationConnections,
+  inventoryItems,
+  autopilotWorkerState,
+  priceChangeBatches,
   memberships,
   organizations,
   priceChangeHistory,
@@ -26,7 +36,7 @@ import {
 import { hashPassword } from "@/server/auth/password";
 import { createInventoryItem, listAllInventory } from "@/server/inventory/service";
 import { inventoryInputSchema } from "@/server/inventory/schemas";
-import { createPricingRule } from "@/server/autopilot/service";
+import { applyPriceBatch, createPricingRule } from "@/server/autopilot/service";
 import { createPricingRuleSchema } from "@/server/autopilot/schemas";
 import { importBrlMarketReferences } from "@/server/market/partner-import";
 import { brlMarketRowSchema } from "@/server/market/partner-csv";
@@ -196,8 +206,7 @@ describe("Fase 9 — Testes de Integração com PostgreSQL Real Isolado", () => 
     expect(reconciled[0].status).toBe("new_product");
 
     // Mock fetch para responder aos produtos WooCommerce sem depender de DNS externo
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    vi.mocked(safeWooGet).mockImplementation(async (input) => {
       const urlStr = String(input);
       if (urlStr.includes("wp-json/wc/v3/products")) {
         return new Response(
@@ -221,15 +230,10 @@ describe("Fase 9 — Testes de Integração com PostgreSQL Real Isolado", () => 
           }
         );
       }
-      return originalFetch(input, init);
-    };
+      return new Response("{}", { status: 404 });
+    });
 
-    let preview;
-    try {
-      preview = await generateCommerceImportPreview(orgA, connectionAId);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    const preview = await generateCommerceImportPreview(orgA, connectionAId);
 
     // Commit da importação
     const commitResult = await commitCommerceImport(orgA, userA, {
@@ -260,6 +264,39 @@ describe("Fase 9 — Testes de Integração com PostgreSQL Real Isolado", () => 
       .where(eq(syncRuns.id, commitResult.syncRunId));
     expect(runRow.status).toBe("completed");
     expect(runRow.completedAt).not.toBeNull();
+  });
+
+  it("consome um preview uma única vez sob dois commits simultâneos", async () => {
+    const preview = await generateCommerceImportPreview(orgA, connectionAId);
+    const attempts = await Promise.allSettled([
+      commitCommerceImport(orgA, userA, { connectionId: connectionAId, previewToken: preview.previewToken }),
+      commitCommerceImport(orgA, userA, { connectionId: connectionAId, previewToken: preview.previewToken }),
+    ]);
+    expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
+    expect(attempts.filter((attempt) => attempt.status === "rejected")).toHaveLength(1);
+    const runRows = await db.select().from(syncRuns).where(eq(syncRuns.connectionId, connectionAId));
+    expect(runRows.filter((row) => row.status === "completed")).toHaveLength(2);
+  });
+
+  it("rejeita confirmação quando preço local muda após o preview", async () => {
+    const preview = await generateCommerceImportPreview(orgA, connectionAId);
+    const id = preview.items[0].matchedInventoryItemId;
+    expect(id).toBeTruthy();
+    await db.update(inventoryItems).set({ price: "199.00" }).where(eq(inventoryItems.id, id!));
+    await expect(commitCommerceImport(orgA, userA, {
+      connectionId: connectionAId, previewToken: preview.previewToken,
+    })).rejects.toThrow("Inventário alterado");
+  });
+
+  it("rejeita confirmação quando a origem WooCommerce muda após o preview", async () => {
+    const preview = await generateCommerceImportPreview(orgA, connectionAId);
+    vi.mocked(safeWooGet).mockResolvedValueOnce(new Response(JSON.stringify([{
+      id: 999, name: "Produto alterado na origem", sku: "ALTERADO", price: "500.00",
+      manage_stock: true, stock_quantity: 1,
+    }]), { status: 200, headers: { "x-wp-totalpages": "1" } }));
+    await expect(commitCommerceImport(orgA, userA, {
+      connectionId: connectionAId, previewToken: preview.previewToken,
+    })).rejects.toThrow("Catálogo WooCommerce alterado");
   });
 
   it("executa o worker Autopilot paginado com checkpoint e retomada", async () => {
@@ -363,6 +400,42 @@ describe("Fase 9 — Testes de Integração com PostgreSQL Real Isolado", () => 
 
     clearWorkerCheckpoint(testCpPath);
   });
+
+  it("retoma em outro processo após crash entre preço e checkpoint sem duplicar lote", async () => {
+    const workerItems = await db.select({ id: inventoryItems.id }).from(inventoryItems).where(and(
+      eq(inventoryItems.organizationId, orgA), like(inventoryItems.organizationSku, `WORKER-CHUNK-${run}-%`),
+    ));
+    expect(workerItems.length).toBeGreaterThan(0);
+    for (const item of workerItems) {
+      await db.update(inventoryItems).set({ price: "110.00" }).where(eq(inventoryItems.id, item.id));
+    }
+    const childCode = (crash: boolean) => `const M=require('module');const old=M._resolveFilename;M._resolveFilename=function(r,...rest){return r==='server-only'?require.resolve('./src/lib/server-only-shim.ts'):old.call(this,r,...rest)};import('./src/server/autopilot/worker.ts').then(m=>m.runAutopilotReevaluationCycle({specificOrgId:'${orgA}',chunkSize:100,maxItemsPerOrganization:100,maxExecutionTimeMs:45000,testCrashAfterApply:${crash}})).then(()=>process.exit(0)).catch(e=>{console.error(e.message);process.exit(1)})`;
+    const runChild = (crash: boolean) => spawnSync(process.execPath, ["--import", "tsx", "-e", childCode(crash)], {
+      cwd: process.cwd(), env: { ...process.env, APP_ENV: "test" }, encoding: "utf8", timeout: 120_000,
+    });
+    const crashed = runChild(true);
+    expect(crashed.status, crashed.stderr).toBe(73);
+    const [state] = await db.select().from(autopilotWorkerState).where(eq(autopilotWorkerState.id, 1));
+    expect(state.status).toBe("running");
+    expect(state.lastItemId).toBeNull();
+    const firstBatches = await db.select().from(priceChangeBatches).where(and(
+      eq(priceChangeBatches.organizationId, orgA), like(priceChangeBatches.idempotencyKey, `${state.runId}:%`),
+    ));
+    expect(firstBatches).toHaveLength(1);
+    await db.update(autopilotWorkerState).set({ leaseExpiresAt: new Date(Date.now() - 1000) }).where(eq(autopilotWorkerState.id, 1));
+    const resumed = runChild(false);
+    expect(resumed.status, resumed.stderr).toBe(0);
+    const repeated = await db.select().from(priceChangeBatches).where(eq(priceChangeBatches.id, firstBatches[0].id));
+    expect(repeated).toHaveLength(1);
+    const history = await db.select().from(priceChangeHistory).where(eq(priceChangeHistory.batchId, firstBatches[0].id));
+    expect(history).toHaveLength(1);
+    await db.update(inventoryItems).set({ price: "110.00" }).where(eq(inventoryItems.id, history[0].inventoryItemId));
+    await expect(applyPriceBatch(orgA, null, {
+      channel: "counter", itemIds: [history[0].inventoryItemId], applyAllSafe: false,
+      source: "autopilot_auto", idempotencyKey: `stale-${run}`,
+      workerFence: { workerId: state.workerId!, version: state.fencingVersion },
+    })).rejects.toThrow("Lease do worker perdido");
+  }, 120_000);
 
   it("impede deleção de conexões por outra organização", async () => {
     // Loja B tenta deletar conexão da Loja A -> deve retornar false/não deletar

@@ -52,7 +52,8 @@ export async function reconcileCommerceProducts(
       )
     );
 
-  const mappingByExternalId = new Map(existingMappings.map((m) => [m.externalId, m]));
+  const mappingKey = (externalId: string, variantId?: string | null) => `${externalId}:${variantId ?? ""}`;
+  const mappingByExternalId = new Map(existingMappings.map((m) => [mappingKey(m.externalId, m.externalVariantId), m]));
 
   // 2. Carregar inventário da própria organização para busca por SKU e atributos
   const existingOrgItems = await db
@@ -88,17 +89,35 @@ export async function reconcileCommerceProducts(
   }
 
   const results: ReconciledItem[] = [];
+  const skuCounts = new Map<string, number>();
+  for (const p of externalProducts) {
+    if (p.sku?.trim()) {
+      const key = p.sku.trim().toUpperCase();
+      skuCounts.set(key, (skuCounts.get(key) ?? 0) + 1);
+    }
+  }
 
   for (const p of externalProducts) {
     const rawPrice = p.price ? parseFloat(p.price) : null;
     const price = rawPrice !== null && !isNaN(rawPrice) && rawPrice >= 0 ? rawPrice : null;
     const rawCost = p.cost ? parseFloat(p.cost) : null;
     const cost = rawCost !== null && !isNaN(rawCost) && rawCost >= 0 ? rawCost : null;
-    const quantity = p.quantity !== null && p.quantity !== undefined ? Math.max(0, p.quantity) : 0;
+    const quantity = p.quantity !== null && p.quantity !== undefined ? Math.max(0, p.quantity) : null;
 
     const language = p.language?.trim() || "pt-BR";
     const condition = p.condition?.trim() || "NM";
     const finish = p.finish?.trim() || "standard";
+
+    if (p.sku && (skuCounts.get(p.sku.trim().toUpperCase()) ?? 0) > 1) {
+      results.push({
+        externalId: p.externalId, externalVariantId: p.externalVariantId,
+        name: p.name, sku: p.sku, barcode: p.barcode, category: p.category,
+        price, cost, quantity, language, condition, finish,
+        setName: p.setName, collectorNumber: p.collectorNumber,
+        status: "conflict", reason: "SKU duplicado na mesma página do catálogo WooCommerce.",
+      });
+      continue;
+    }
 
     // Regra 1: Dados insuficientes (sem nome ou sem preço e sem estoque)
     if (!p.name || (!p.sku && !p.barcode && !p.setName)) {
@@ -124,7 +143,7 @@ export async function reconcileCommerceProducts(
     }
 
     // Regra 2: Mapeamento externo pré-existente
-    const existingMapping = mappingByExternalId.get(p.externalId);
+    const existingMapping = mappingByExternalId.get(mappingKey(p.externalId, p.externalVariantId));
     if (existingMapping) {
       const mappedItem = itemById.get(existingMapping.inventoryItemId);
       if (mappedItem) {
@@ -149,6 +168,7 @@ export async function reconcileCommerceProducts(
           matchedProductName: mappedItem.productName,
           matchedVariantId: mappedItem.variantId,
           currentGeekPrice: Number(mappedItem.price),
+          currentCost: Number(mappedItem.cost),
           currentStock: mappedItem.quantity,
         });
         continue;
@@ -215,6 +235,7 @@ export async function reconcileCommerceProducts(
           matchedProductName: skuMatch.productName,
           matchedVariantId: skuMatch.variantId,
           currentGeekPrice: Number(skuMatch.price),
+          currentCost: Number(skuMatch.cost),
           currentStock: skuMatch.quantity,
         });
         continue;
@@ -265,6 +286,7 @@ export async function reconcileCommerceProducts(
         matchedProductName: probableMatch.productName,
         matchedVariantId: probableMatch.variantId,
         currentGeekPrice: Number(probableMatch.price),
+        currentCost: Number(probableMatch.cost),
         currentStock: probableMatch.quantity,
       });
       continue;
@@ -275,7 +297,7 @@ export async function reconcileCommerceProducts(
       externalId: p.externalId,
       externalVariantId: p.externalVariantId,
       name: p.name,
-      sku: p.sku || `EXT-${p.externalId}`,
+      sku: p.sku || `EXT-${p.externalId}${p.externalVariantId ? `-${p.externalVariantId}` : ""}`,
       barcode: p.barcode,
       category: p.category || "Geral",
       price,

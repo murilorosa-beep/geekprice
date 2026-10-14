@@ -50,7 +50,7 @@ export type ReconciledItem = {
   price: number | null;
   regularPrice?: number | null;
   cost: number | null;
-  quantity: number;
+  quantity: number | null;
   language: string;
   condition: string;
   finish: string;
@@ -62,6 +62,7 @@ export type ReconciledItem = {
   matchedProductName?: string | null;
   matchedVariantId?: string | null;
   currentGeekPrice?: number | null;
+  currentCost?: number | null;
   currentStock?: number | null;
   conflictDetails?: string | null;
 };

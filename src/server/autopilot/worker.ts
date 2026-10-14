@@ -2,8 +2,9 @@ import "server-only";
 
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import postgres from "postgres";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { databaseTlsOptions } from "@/db/connection-settings";
 import { alerts, organizations } from "@/db/schema";
@@ -20,6 +21,8 @@ import {
 export type WorkerCheckpoint = {
   lastOrgId: string | null;
   lastItemOffset: number;
+  lastChannel?: "counter" | "ecommerce" | "marketplace" | null;
+  lastItemId?: string | null;
   updatedAt: string;
   completed: boolean;
 };
@@ -59,9 +62,44 @@ export type WorkerCycleOptions = {
   chunkSize?: number;
   resumeFromCheckpoint?: boolean;
   checkpointStorePath?: string;
+  testCrashAfterApply?: boolean;
 };
 
 export class AutopilotBusyError extends Error {}
+
+type WorkerLease = { workerId: string; version: number; runId: string };
+
+async function acquireWorkerLease(): Promise<{ lease: WorkerLease; checkpoint: WorkerCheckpoint }> {
+  const workerId = randomUUID();
+  const rows = await db.execute(sql`update autopilot_worker_state
+    set worker_id = ${workerId}::uuid, fencing_version = fencing_version + 1,
+        lease_expires_at = now() + interval '60 seconds', heartbeat_at = now(),
+        status = 'running', attempts = attempts + 1,
+        started_at = coalesce(started_at, now()), error_summary = null
+    where id = 1 and (status <> 'running' or lease_expires_at < now())
+    returning run_id, organization_id, channel, last_item_id, fencing_version`);
+  if (rows.length !== 1) throw new AutopilotBusyError("Já existe um lease ativo do Autopilot.");
+  const row = rows[0] as unknown as { run_id: string; organization_id: string | null; channel: WorkerCheckpoint["lastChannel"]; last_item_id: string | null; fencing_version: number };
+  return {
+    lease: { workerId, version: row.fencing_version, runId: row.run_id },
+    checkpoint: { lastOrgId: row.organization_id, lastItemOffset: 0, lastChannel: row.channel, lastItemId: row.last_item_id, completed: false, updatedAt: new Date().toISOString() },
+  };
+}
+
+async function persistWorkerCheckpoint(lease: WorkerLease, checkpoint: WorkerCheckpoint, status = "running", error?: string): Promise<void> {
+  const rows = await db.execute(sql`update autopilot_worker_state
+    set run_id = ${status === "idle" ? sql`gen_random_uuid()` : sql`run_id`},
+        organization_id = ${checkpoint.lastOrgId}::uuid,
+        channel = ${checkpoint.lastChannel ?? null}, last_item_id = ${checkpoint.lastItemId ?? null}::uuid,
+        heartbeat_at = now(), lease_expires_at = ${status === "running" ? sql`now() + interval '60 seconds'` : sql`null`},
+        status = ${status}, error_summary = ${error ?? null},
+        worker_id = ${status === "running" ? lease.workerId : null}::uuid,
+        completed_at = ${status === "idle" ? sql`now()` : sql`null`}
+    where id = 1 and worker_id = ${lease.workerId}::uuid
+      and fencing_version = ${lease.version} and lease_expires_at > now()
+    returning id`);
+  if (rows.length !== 1) throw new AutopilotBusyError("Lease do worker perdido; progresso não confirmado.");
+}
 
 let workerInProgress = false;
 
@@ -111,7 +149,8 @@ export async function runAutopilotReevaluationCycle(
   workerInProgress = true;
   const lockUrl = process.env.DATABASE_MIGRATION_URL || process.env.DATABASE_URL;
   try {
-    if (!lockUrl || new URL(lockUrl).port === "6543") {
+    if (!lockUrl || new URL(lockUrl).port === "6543" ||
+      (process.env.DATABASE_URL && new URL(lockUrl).pathname !== new URL(process.env.DATABASE_URL).pathname)) {
       throw new Error("O worker exige uma conexão PostgreSQL de sessão para seu bloqueio distribuído.");
     }
     const lockClient = postgres(lockUrl, { ...databaseTlsOptions(), prepare: false, max: 1, connect_timeout: 10 });
@@ -121,7 +160,16 @@ export async function runAutopilotReevaluationCycle(
         const [lock] = await reserved`select pg_try_advisory_lock(hashtextextended('geekprice:autopilot-worker', 0)) as acquired`;
         if (!lock.acquired) throw new AutopilotBusyError("Já existe um ciclo do Autopilot em execução.");
         try {
-          return await runUnlockedCycle(options);
+          const { lease, checkpoint } = await acquireWorkerLease();
+          try {
+            return await runUnlockedCycle(options, lease, checkpoint);
+          } catch (error) {
+            await db.execute(sql`update autopilot_worker_state set status = 'failed',
+              error_summary = ${error instanceof Error ? error.message.slice(0, 500) : "Falha desconhecida"},
+              worker_id = null, lease_expires_at = null
+              where id = 1 and worker_id = ${lease.workerId}::uuid and fencing_version = ${lease.version}`);
+            throw error;
+          }
         } finally {
           await reserved`select pg_advisory_unlock(hashtextextended('geekprice:autopilot-worker', 0))`;
         }
@@ -136,16 +184,13 @@ export async function runAutopilotReevaluationCycle(
   }
 }
 
-async function runUnlockedCycle(options?: WorkerCycleOptions): Promise<WorkerExecutionResult> {
+async function runUnlockedCycle(options: WorkerCycleOptions | undefined, lease: WorkerLease, previousCheckpoint: WorkerCheckpoint): Promise<WorkerExecutionResult> {
   const startTime = Date.now();
   const maxExecutionTimeMs = options?.maxExecutionTimeMs ?? 45_000;
   const maxOrganizations = options?.maxOrganizationsPerCycle ?? 50;
   const maxItemsPerOrg = options?.maxItemsPerOrganization ?? 1_000;
   const maxTotalItems = options?.maxTotalItemsPerCycle ?? 5_000;
   const chunkSize = options?.chunkSize ?? 100;
-  const checkpointPath = options?.checkpointStorePath;
-
-  const previousCheckpoint = options?.resumeFromCheckpoint !== false ? loadWorkerCheckpoint(checkpointPath) : null;
 
   const orgFilter = options?.specificOrgId
     ? eq(organizations.id, options.specificOrgId)
@@ -157,16 +202,15 @@ async function runUnlockedCycle(options?: WorkerCycleOptions): Promise<WorkerExe
     .where(orgFilter)
     .orderBy(asc(organizations.id));
 
-  // Retomada a partir do checkpoint se existente
-  let resumeOffset = 0;
-  if (previousCheckpoint && !previousCheckpoint.completed && previousCheckpoint.lastOrgId) {
+  // Rotação por organização: retoma a atual quando parcial e avança após conclusão.
+  if (previousCheckpoint.lastOrgId) {
     const resumeIdx = orgs.findIndex((o) => o.id === previousCheckpoint.lastOrgId);
     if (resumeIdx !== -1) {
-      orgs = orgs.slice(resumeIdx);
-      resumeOffset = previousCheckpoint.lastItemOffset;
+      orgs = [...orgs.slice(resumeIdx), ...orgs.slice(0, resumeIdx)];
     }
   }
 
+  const allOrgs = orgs;
   // Limite de organizações por ciclo
   if (orgs.length > maxOrganizations) {
     orgs = orgs.slice(0, maxOrganizations);
@@ -189,7 +233,7 @@ async function runUnlockedCycle(options?: WorkerCycleOptions): Promise<WorkerExe
 
   for (let oIdx = 0; oIdx < orgs.length; oIdx++) {
     const org = orgs[oIdx];
-    const isResumedOrg = oIdx === 0 && resumeOffset > 0;
+    const isResumedOrg = oIdx === 0 && previousCheckpoint.lastOrgId === org.id;
     let orgItemsEvaluated = 0;
 
     const [rules, basePolicy] = await Promise.all([
@@ -206,7 +250,8 @@ async function runUnlockedCycle(options?: WorkerCycleOptions): Promise<WorkerExe
     };
 
     for (const channel of channels) {
-      let offset = isResumedOrg ? resumeOffset : 0;
+      if (isResumedOrg && previousCheckpoint.lastChannel && channels.indexOf(channel) < channels.indexOf(previousCheckpoint.lastChannel)) continue;
+      let afterId = isResumedOrg && previousCheckpoint.lastChannel === channel ? previousCheckpoint.lastItemId ?? null : null;
       let channelSafeCount = 0;
       let channelSuspiciousCount = 0;
       let channelAutoApplied = false;
@@ -217,16 +262,21 @@ async function runUnlockedCycle(options?: WorkerCycleOptions): Promise<WorkerExe
           interruptedByBudget = true;
           currentCheckpoint = {
             lastOrgId: org.id,
-            lastItemOffset: offset,
+            lastItemOffset: 0,
+            lastChannel: channel,
+            lastItemId: afterId,
             updatedAt: new Date().toISOString(),
             completed: false,
           };
-          saveWorkerCheckpoint(currentCheckpoint, checkpointPath);
+          await persistWorkerCheckpoint(lease, currentCheckpoint, "interrupted");
           break;
         }
 
         // Verificar limite por organização e global por ciclo
         if (orgItemsEvaluated >= maxItemsPerOrg || totalEvaluated >= maxTotalItems) {
+          interruptedByBudget = true;
+          currentCheckpoint = { lastOrgId: org.id, lastItemOffset: 0, lastChannel: channel, lastItemId: afterId, updatedAt: new Date().toISOString(), completed: false };
+          await persistWorkerCheckpoint(lease, currentCheckpoint, "interrupted");
           break;
         }
 
@@ -238,7 +288,7 @@ async function runUnlockedCycle(options?: WorkerCycleOptions): Promise<WorkerExe
 
         const chunk = await listInventoryChunk(org.id, {
           limit: currentLimit,
-          offset,
+          afterId,
         });
 
         if (chunk.length === 0) {
@@ -249,7 +299,6 @@ async function runUnlockedCycle(options?: WorkerCycleOptions): Promise<WorkerExe
 
         totalEvaluated += chunk.length;
         orgItemsEvaluated += chunk.length;
-        offset += chunk.length;
 
         totalSafe += chunkResult.safe.length;
         totalSuspicious += chunkResult.flagged.length;
@@ -280,21 +329,28 @@ async function runUnlockedCycle(options?: WorkerCycleOptions): Promise<WorkerExe
           ? chunkResult.safe.filter((item) => isRuleEligibleForAutoApply(item.ruleId, rules))
           : [];
 
-        if (eligibleItems.length > 0) {
+        for (const eligible of eligibleItems) {
+          await persistWorkerCheckpoint(lease, { lastOrgId: org.id, lastItemOffset: 0, lastChannel: channel, lastItemId: afterId, updatedAt: new Date().toISOString(), completed: false });
           const applyRes = await applyPriceBatch(org.id, null, {
             channel,
-            itemIds: eligibleItems.map((i) => i.id),
+            itemIds: [eligible.id],
             applyAllSafe: false,
             source: "autopilot_auto",
-            notes: `Autopilot Worker Recorrente: ${eligibleItems.length} alterações seguras aplicadas`,
+            idempotencyKey: `${lease.runId}:${channel}:${eligible.id}`,
+            workerFence: { workerId: lease.workerId, version: lease.version },
+            notes: "Autopilot Worker Recorrente: alteração segura aplicada",
           });
 
           if (applyRes.success && applyRes.batch) {
             channelAutoApplied = true;
-            totalApplied += eligibleItems.length;
+            totalApplied += 1;
             batchesCreated += 1;
+            if (options?.testCrashAfterApply && process.env.APP_ENV === "test") process.exit(73);
           }
         }
+        afterId = chunk[chunk.length - 1].id;
+        currentCheckpoint = { lastOrgId: org.id, lastItemOffset: 0, lastChannel: channel, lastItemId: afterId, updatedAt: new Date().toISOString(), completed: false };
+        await persistWorkerCheckpoint(lease, currentCheckpoint);
       }
 
       details.push({
@@ -307,12 +363,28 @@ async function runUnlockedCycle(options?: WorkerCycleOptions): Promise<WorkerExe
       });
 
       if (interruptedByBudget) break;
+      const nextChannel = channels[channels.indexOf(channel) + 1];
+      if (nextChannel) {
+        currentCheckpoint = { lastOrgId: org.id, lastItemOffset: 0, lastChannel: nextChannel, lastItemId: null, updatedAt: new Date().toISOString(), completed: false };
+        await persistWorkerCheckpoint(lease, currentCheckpoint);
+      }
     }
 
     if (interruptedByBudget) break;
+    const nextOrg = orgs[oIdx + 1];
+    if (nextOrg) {
+      currentCheckpoint = { lastOrgId: nextOrg.id, lastItemOffset: 0, lastChannel: "counter", lastItemId: null, updatedAt: new Date().toISOString(), completed: false };
+      await persistWorkerCheckpoint(lease, currentCheckpoint);
+    }
   }
 
-  // Se completou todas as organizações sem interrupção de orçamento, limpa checkpoint
+  if (!interruptedByBudget && allOrgs.length > orgs.length) {
+    interruptedByBudget = true;
+    currentCheckpoint = { lastOrgId: allOrgs[orgs.length].id, lastItemOffset: 0, lastChannel: "counter", lastItemId: null, updatedAt: new Date().toISOString(), completed: false };
+    await persistWorkerCheckpoint(lease, currentCheckpoint, "interrupted");
+  }
+
+  // Só conclui a execução lógica após percorrer todas as organizações.
   if (!interruptedByBudget) {
     currentCheckpoint = {
       lastOrgId: null,
@@ -320,7 +392,7 @@ async function runUnlockedCycle(options?: WorkerCycleOptions): Promise<WorkerExe
       updatedAt: new Date().toISOString(),
       completed: true,
     };
-    clearWorkerCheckpoint(checkpointPath);
+    await persistWorkerCheckpoint(lease, currentCheckpoint, "idle");
   }
 
   const durationMs = Date.now() - startTime;

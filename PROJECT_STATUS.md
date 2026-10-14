@@ -1,15 +1,24 @@
 # GeekPrice — situação do projeto
 
-## Estado atual — Fase 9 (14/10/2026)
+## Estado atual — Fase 9.2 (14/10/2026)
 
-O estado técnico vigente está documentado em [PHASE9_PILOT_READINESS_REPORT.md](PHASE9_PILOT_READINESS_REPORT.md). A Fase 9 preparou o GeekPrice para pilotos comerciais assistidos (read-only):
+O estado técnico vigente e comprovado está documentado em [PHASE9_2_DISTRIBUTED_INTEGRITY_REPORT.md](PHASE9_2_DISTRIBUTED_INTEGRITY_REPORT.md). A Fase 9.2 consolidou a integridade distribuída e transacional do sistema:
+- **Migration 0013 (`0013_distributed_integrity.sql`):** Criou `autopilot_worker_state` (singleton com lease, heartbeat e fencing version), `commerce_previews` (snapshot JSONB durável, payload hash canônico e status restrito) e `price_change_batches.idempotency_key` (índice único composto por organização). Aplicada **exclusivamente** no banco isolado de testes (`geekprice_phase81_test_1791978720676`). Banco comercial `postgres` intocado na versão `0012`.
+- **Defesa SSRF (`src/server/commerce/safe-request.ts`):** Validação de URLs HTTPS, DNS IPv4 público, pinning de IP em TLS e bloqueio de faixas privadas/link-local/multicast.
+- **Preview & Commit Transacional:** Snapshot de catálogo persistido com hash canônico estável; `SELECT ... FOR UPDATE` no consumo de preview; concorrência de commits resulta em 1 vencedor e 1 rejeição segura; detecção automática de alterações em catálogo remoto ou estoque local.
+- **Worker com Lease e Fencing:** Aquisição de lease atômica; tokens de fencing impedem workers defasados ou desconectados de gravar progresso; retomada após crash em processo separado comprovada sem duplicar lotes ou históricos financeiros.
+- **Testes & Qualidade:** 83 testes unitários aprovados (24 arquivos), 31 testes de integração com PostgreSQL real isolado (Supabase 17.11) aprovados com 100% de sucesso, typecheck e lint sem erros, build Next.js com 69 rotas compiladas com sucesso.
+- **Alinhamento ao Marco 1:** Sistema base funcional sem dependência de cobranças, cron produtivo ou integrações externas obrigatórias.
+
+## Estado anterior — Fase 9 (14/10/2026)
+
+O estado técnico da Fase 9 está documentado em [PHASE9_PILOT_READINESS_REPORT.md](PHASE9_PILOT_READINESS_REPORT.md). A Fase 9 preparou o GeekPrice para pilotos comerciais assistidos (read-only):
 - **Staging & Segurança:** Guardas ativas em runtime (`src/server/environment.ts`) bloqueando testes destrutivos no banco comercial; arquitetura em `docs/STAGING_ENVIRONMENT.md`.
 - **Worker Autopilot Escalável:** Paginação em chunks, limites por organização/ciclo, orçamento de tempo (`maxExecutionTimeMs`), checkpoints persistentes com retomada e métricas de memória Node.js.
 - **Primeira Integração Real (WooCommerce):** Conector REST v3 com HTTPS obrigatório, credenciais cifradas em repouso com AES-256-GCM, parser inteligente de metadados TCG.
 - **Motor de Conciliação Inteligente:** Classificação estrita em 5 estados com preview assinado via HMAC-SHA256 (15 min) e commit transacional.
 - **Fontes de Mercado BRL:** Estratégia oficial documentada em `docs/BRAZILIAN_MARKET_INTELLIGENCE.md` (Mercado Livre API, feeds parceiros, MSRP oficial, quarentena estatística).
 - **Playbook do Piloto Comercial:** Guia completo de 4 semanas para 3–5 lojistas em `docs/PILOT_PROGRAM_PLAYBOOK.md`.
-- **Testes & Qualidade:** 80 testes unitários aprovados (24 arquivos), 27 testes de integração com PostgreSQL real isolado (Supabase 17.11) aprovados, typecheck e lint zerados, build Next.js com 69 rotas compiladas com sucesso.
 
 ## Estado anterior — Fase 8.2 (14/10/2026)
 

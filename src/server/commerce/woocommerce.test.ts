@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WooCommerceConnector } from "./woocommerce";
+import { safeWooGet, validateStoreUrl, assertPublicIpv4 } from "./safe-request";
+
+vi.mock("./safe-request", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./safe-request")>();
+  return { ...actual, safeWooGet: vi.fn() };
+});
 
 describe("Conector WooCommerce REST API v3", () => {
   beforeEach(() => {
@@ -65,7 +71,7 @@ describe("Conector WooCommerce REST API v3", () => {
       },
     ];
 
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+    vi.mocked(safeWooGet).mockResolvedValueOnce(
       new Response(JSON.stringify(mockProducts), {
         status: 200,
         headers: {
@@ -99,7 +105,7 @@ describe("Conector WooCommerce REST API v3", () => {
   });
 
   it("trata erro HTTP 429 de rate limit com mensagem explícita", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+    vi.mocked(safeWooGet).mockResolvedValueOnce(
       new Response(JSON.stringify({ code: "woocommerce_rest_rate_limit" }), {
         status: 429,
         statusText: "Too Many Requests",
@@ -115,5 +121,35 @@ describe("Conector WooCommerce REST API v3", () => {
     await expect(connector.pullProducts({ cursor: null, updatedAfter: null })).rejects.toThrow(
       "Limite de requisições excedido"
     );
+  });
+
+  it("não importa o pai variável nem produtos privados; preserva IDs e atributos das variações", async () => {
+    vi.mocked(safeWooGet)
+      .mockResolvedValueOnce(new Response(JSON.stringify([
+        { id: 10, type: "variable", status: "publish", name: "Carta", sku: "PAI", categories: [{ name: "TCG" }] },
+        { id: 11, type: "simple", status: "private", name: "Secreto", sku: "PRIVATE" },
+      ]), { status: 200, headers: { "x-wp-totalpages": "1" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([
+        { id: 101, status: "publish", sku: "CARTA-FOIL", price: "20.00", manage_stock: true, stock_quantity: 2, attributes: [{ name: "Acabamento", option: "foil" }] },
+        { id: 102, status: "private", sku: "CARTA-PRIVATE", price: "30.00" },
+      ]), { status: 200, headers: { "x-wp-totalpages": "1" } }));
+    const connector = new WooCommerceConnector({ storeUrl: "https://loja.com.br", consumerKey: "ck_12345", consumerSecret: "cs_12345" });
+    const result = await connector.pullProducts({ cursor: null, updatedAfter: null });
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ externalId: "10", externalVariantId: "101", sku: "CARTA-FOIL", finish: "foil" });
+  });
+});
+
+describe("limites de rede WooCommerce", () => {
+  it("bloqueia URLs internas, portas e credenciais embutidas", () => {
+    for (const url of ["http://loja.com", "https://localhost", "https://127.0.0.1", "https://loja.com:8443", "https://user:pass@loja.com", "https://loja.com/redirect"]) {
+      expect(() => validateStoreUrl(url)).toThrow();
+    }
+  });
+  it("rejeita faixas IPv4 privadas, metadata e documentação", () => {
+    for (const ip of ["127.0.0.1", "10.0.0.1", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "203.0.113.1"]) {
+      expect(() => assertPublicIpv4(ip)).toThrow();
+    }
+    expect(() => assertPublicIpv4("8.8.8.8")).not.toThrow();
   });
 });

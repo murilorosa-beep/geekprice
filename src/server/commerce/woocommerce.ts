@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { CommerceConnector, CommerceProduct, SyncCursor } from "./types";
+import { safeWooGet, validateStoreUrl } from "./safe-request";
 
 export type WooCommerceCredentials = {
   storeUrl: string;
@@ -23,16 +24,7 @@ export class WooCommerceConnector implements CommerceConnector {
       throw new Error("Consumer Key e Consumer Secret do WooCommerce são obrigatórios.");
     }
 
-    let url = credentials.storeUrl.trim();
-    if (!url.startsWith("http://") && !url.startsWith("https://")) {
-      url = "https://" + url;
-    }
-    // Em produção, exigir estritamente HTTPS
-    if (process.env.NODE_ENV === "production" && !url.startsWith("https://")) {
-      throw new Error("Conexões WooCommerce em ambiente de produção devem utilizar HTTPS obrigatoriamente.");
-    }
-
-    this.baseUrl = url.replace(/\/+$/, "");
+    this.baseUrl = validateStoreUrl(credentials.storeUrl.trim()).origin;
     const token = Buffer.from(
       `${credentials.consumerKey.trim()}:${credentials.consumerSecret.trim()}`
     ).toString("base64");
@@ -42,28 +34,14 @@ export class WooCommerceConnector implements CommerceConnector {
   async testConnection(): Promise<{ ok: boolean; message: string; details?: Record<string, unknown> }> {
     try {
       const endpoint = `${this.baseUrl}/wp-json/wc/v3/system_status`;
-      const response = await fetch(endpoint, {
-        headers: {
-          Authorization: this.authHeader,
-          Accept: "application/json",
-          "User-Agent": "GeekPrice-Commerce/1.0",
-        },
-        signal: AbortSignal.timeout(10_000),
-      });
+      const response = await safeWooGet(new URL(endpoint), this.authHeader, 10_000);
 
       if (response.status === 200) {
         return { ok: true, message: "Conexão com WooCommerce estabelecida com sucesso." };
       }
 
       // Fallback para endpoint de produtos caso system_status esteja bloqueado por segurança do host
-      const fallback = await fetch(`${this.baseUrl}/wp-json/wc/v3/products?per_page=1`, {
-        headers: {
-          Authorization: this.authHeader,
-          Accept: "application/json",
-          "User-Agent": "GeekPrice-Commerce/1.0",
-        },
-        signal: AbortSignal.timeout(10_000),
-      });
+      const fallback = await safeWooGet(new URL(`${this.baseUrl}/wp-json/wc/v3/products?per_page=1`), this.authHeader, 10_000);
 
       if (fallback.status === 200) {
         return { ok: true, message: "Conexão com catálogo WooCommerce verificada com sucesso." };
@@ -100,14 +78,7 @@ export class WooCommerceConnector implements CommerceConnector {
       url.searchParams.set("after", cursor.updatedAfter.toISOString());
     }
 
-    const response = await fetch(url.toString(), {
-      headers: {
-        Authorization: this.authHeader,
-        Accept: "application/json",
-        "User-Agent": "GeekPrice-Commerce/1.0",
-      },
-      signal: AbortSignal.timeout(20_000),
-    });
+    const response = await safeWooGet(url, this.authHeader, 20_000);
 
     if (response.status === 429) {
       throw new Error("Limite de requisições excedido na API da loja WooCommerce (HTTP 429). Aguarde alguns segundos.");
@@ -130,8 +101,45 @@ export class WooCommerceConnector implements CommerceConnector {
     const items: CommerceProduct[] = [];
 
     for (const raw of rawData) {
-      const p = this.parseWooProduct(raw);
-      if (p) items.push(p);
+      if (!raw || typeof raw !== "object" || (raw.status && raw.status !== "publish")) continue;
+      if (raw.type === "variable") {
+        const parentId = Number(raw.id);
+        if (!Number.isSafeInteger(parentId) || parentId <= 0) continue;
+        let variationPage = 1;
+        let variationPages = 1;
+        do {
+          if (variationPage > 100) throw new Error("Produto variável excede o limite de 10.000 variações por prévia.");
+          const variationUrl = new URL(`${this.baseUrl}/wp-json/wc/v3/products/${parentId}/variations`);
+          variationUrl.searchParams.set("page", String(variationPage));
+          variationUrl.searchParams.set("per_page", "100");
+          variationUrl.searchParams.set("status", "publish");
+          const variationResponse = await safeWooGet(variationUrl, this.authHeader, 20_000);
+          if (!variationResponse.ok) throw new Error(`Erro na consulta de variações WooCommerce: HTTP ${variationResponse.status}`);
+          const variations = await variationResponse.json();
+          if (!Array.isArray(variations)) throw new Error("Formato de variações WooCommerce inválido.");
+          variationPages = Number(variationResponse.headers.get("x-wp-totalpages") || 1);
+          if (!Number.isSafeInteger(variationPages) || variationPages < 1 || variationPages > 100) throw new Error("Paginação de variações inválida ou excessiva.");
+          for (const variation of variations) {
+            if (!variation || typeof variation !== "object" || (variation.status && variation.status !== "publish")) continue;
+            const attrs = Array.isArray(variation.attributes) ? variation.attributes.filter((attr: Record<string, unknown>) => attr?.option).map((attr: Record<string, unknown>) => ({ name: attr.name, options: [attr.option] })) : [];
+            const p = this.parseWooProduct({
+              ...raw, ...variation, id: raw.id,
+              name: `${raw.name} — ${attrs.map((attr: { options: unknown[] }) => attr.options[0]).join(" / ") || variation.id}`,
+              attributes: attrs,
+              categories: raw.categories,
+              sku: variation.sku || "",
+            });
+            if (p) {
+              p.externalVariantId = String(variation.id);
+              items.push(p);
+            }
+          }
+          variationPage++;
+        } while (variationPage <= variationPages);
+      } else if (!raw.type || raw.type === "simple") {
+        const p = this.parseWooProduct(raw);
+        if (p) items.push(p);
+      }
     }
 
     const nextCursor = page < totalPages ? String(page + 1) : null;
@@ -171,8 +179,6 @@ export class WooCommerceConnector implements CommerceConnector {
     let quantity: number | null = null;
     if (raw.manage_stock === true && raw.stock_quantity !== null && raw.stock_quantity !== undefined) {
       quantity = Math.max(0, parseInt(String(raw.stock_quantity), 10) || 0);
-    } else if (raw.stock_status === "instock") {
-      quantity = 1;
     } else if (raw.stock_status === "outofstock") {
       quantity = 0;
     }
@@ -233,8 +239,11 @@ export class WooCommerceConnector implements CommerceConnector {
     }
 
     let updatedAt: Date | null = null;
-    if (raw.date_modified && typeof raw.date_modified === "string") {
-      const d = new Date(raw.date_modified);
+    const modified = typeof raw.date_modified_gmt === "string"
+      ? (/Z$|[+-]\d\d:\d\d$/.test(raw.date_modified_gmt) ? raw.date_modified_gmt : `${raw.date_modified_gmt}Z`)
+      : raw.date_modified;
+    if (modified && typeof modified === "string") {
+      const d = new Date(modified);
       if (!isNaN(d.getTime())) updatedAt = d;
     }
 

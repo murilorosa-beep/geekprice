@@ -1,10 +1,11 @@
 import "server-only";
 
-import { createHmac, createHash } from "node:crypto";
+import { createHmac, createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   externalProductMappings,
+  commercePreviews,
   integrationConnections,
   inventoryItems,
   products,
@@ -19,18 +20,23 @@ import type {
   ImportCommitInput,
   ImportCommitResult,
   ImportPreviewResult,
-  ReconciledItem,
 } from "./types";
 import { WooCommerceConnector, type WooCommerceCredentials } from "./woocommerce";
 
 function getSigningSecret(): string {
-  return process.env.NEXTAUTH_SECRET || "fallback-secret-for-signing-only";
+  const secret = process.env.COMMERCE_PREVIEW_SIGNING_KEY || process.env.NEXTAUTH_SECRET;
+  if (!secret || secret.length < 32) throw new Error("Chave de assinatura de preview não configurada.");
+  return secret;
 }
 
 function generatePreviewToken(payload: {
   connectionId: string;
   organizationId: string;
+  previewId: string;
   hash: string;
+  sourceHash: string;
+  page: number;
+  perPage: number;
   itemsCount: number;
   expiresAt: number;
 }): string {
@@ -42,7 +48,11 @@ function generatePreviewToken(payload: {
 function verifyPreviewToken(token: string): {
   connectionId: string;
   organizationId: string;
+  previewId: string;
   hash: string;
+  sourceHash: string;
+  page: number;
+  perPage: number;
   itemsCount: number;
   expiresAt: number;
 } {
@@ -53,7 +63,7 @@ function verifyPreviewToken(token: string): {
 
   const data = Buffer.from(dataB64, "base64url").toString("utf8");
   const expectedSig = createHmac("sha256", getSigningSecret()).update(data).digest("base64url");
-  if (signature !== expectedSig) {
+  if (signature.length !== expectedSig.length || !timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSig))) {
     throw new Error("Assinatura do token de pré-visualização inválida ou adulterada.");
   }
 
@@ -173,13 +183,23 @@ export async function getConnectorForConnection(
   throw new Error(`Tipo de integração "${connection.kind}" ainda não homologado.`);
 }
 
-// Armazenamento em memória de curta duração para itens de preview assinados
-const previewCache = new Map<string, { items: ReconciledItem[]; expiresAt: number }>();
+function snapshotHash(items: unknown): string {
+  const canonical = (value: unknown): unknown => {
+    if (value instanceof Date) return value.toISOString();
+    if (Array.isArray(value)) return value.map(canonical);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, nested]) => [key, canonical(nested)]));
+    }
+    return value;
+  };
+  return createHash("sha256").update(JSON.stringify(canonical(items))).digest("hex");
+}
 
 export async function generateCommerceImportPreview(
   organizationId: string,
   connectionId: string,
-  options?: { page?: number; perPage?: number }
+  options?: { page?: number; perPage?: number },
+  userId?: string
 ): Promise<ImportPreviewResult> {
   const connector = await getConnectorForConnection(organizationId, connectionId);
 
@@ -210,20 +230,30 @@ export async function generateCommerceImportPreview(
     else if (item.status === "insufficient_data") insufficientData++;
   }
 
-  const hash = createHash("sha256")
-    .update(JSON.stringify(reconciledItems.map((i) => ({ id: i.externalId, s: i.status }))))
-    .digest("hex");
+  const hash = snapshotHash(reconciledItems);
 
   const expiresAt = Date.now() + 15 * 60 * 1000;
+  const previewId = randomUUID();
+  await db.insert(commercePreviews).values({
+    id: previewId,
+    organizationId,
+    connectionId,
+    createdById: userId ?? null,
+    payloadHash: hash,
+    snapshot: reconciledItems,
+    expiresAt: new Date(expiresAt),
+  });
   const previewToken = generatePreviewToken({
     connectionId,
     organizationId,
+    previewId,
     hash,
+    sourceHash: snapshotHash(pullResult.items),
+    page: options?.page || 1,
+    perPage: options?.perPage || 100,
     itemsCount: reconciledItems.length,
     expiresAt,
   });
-
-  previewCache.set(previewToken, { items: reconciledItems, expiresAt });
 
   return {
     connectionId,
@@ -253,18 +283,38 @@ export async function commitCommerceImport(
     throw new Error("Conexão divergente do preview aprovado.");
   }
 
-  const cached = previewCache.get(input.previewToken);
-  let itemsToProcess = cached?.items;
-
-  // Se o cache local expirou ou reiniciou, re-consulta com o mesmo conector
-  if (!itemsToProcess) {
-    const preview = await generateCommerceImportPreview(organizationId, input.connectionId);
-    itemsToProcess = preview.items;
+  // Revalidação externa anterior à transação: falha fechada se a origem mudou ou caiu.
+  const sourceConnector = await getConnectorForConnection(organizationId, input.connectionId);
+  const currentSource = await sourceConnector.pullProducts({
+    cursor: null, updatedAfter: null, page: tokenPayload.page, perPage: tokenPayload.perPage,
+  });
+  if (snapshotHash(currentSource.items) !== tokenPayload.sourceHash) {
+    throw new Error("Catálogo WooCommerce alterado desde o preview. Gere uma nova pré-visualização.");
   }
 
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select id from commerce_previews where id = ${tokenPayload.previewId}::uuid for update`);
+    const [preview] = await tx.select().from(commercePreviews).where(and(
+      eq(commercePreviews.id, tokenPayload.previewId),
+      eq(commercePreviews.organizationId, organizationId),
+      eq(commercePreviews.connectionId, input.connectionId),
+    )).limit(1);
+    if (!preview) throw new Error("Pré-visualização não encontrada para esta organização.");
+    if (preview.status !== "pending") throw new Error("Pré-visualização já confirmada ou indisponível.");
+    if (Date.now() > preview.expiresAt.getTime()) throw new Error("Pré-visualização expirada. Gere uma nova.");
+    if (preview.createdById && preview.createdById !== userId) throw new Error("Pré-visualização pertence a outro usuário.");
+    let itemsToProcess = preview.snapshot;
+    if (snapshotHash(itemsToProcess) !== preview.payloadHash || preview.payloadHash !== tokenPayload.hash || itemsToProcess.length !== tokenPayload.itemsCount) {
+      throw new Error("Snapshot de pré-visualização divergente do token aprovado.");
+    }
+
   // Filtrar itens selecionados se informado
-  if (input.selectedExternalIds && input.selectedExternalIds.length > 0) {
+  if (input.selectedExternalIds) {
     const selectedSet = new Set(input.selectedExternalIds);
+    if (selectedSet.size === 0) throw new Error("Nenhum produto selecionado para importação.");
+    if (selectedSet.size !== input.selectedExternalIds.length || ![...selectedSet].every((id) => itemsToProcess.some((item) => item.externalId === id))) {
+      throw new Error("Seleção contém itens duplicados ou ausentes no preview.");
+    }
     itemsToProcess = itemsToProcess.filter((i) => selectedSet.has(i.externalId));
   }
 
@@ -272,12 +322,16 @@ export async function commitCommerceImport(
   const confirmedProbable = new Map<string, string>();
   if (input.confirmedProbableMatches) {
     for (const match of input.confirmedProbableMatches) {
+      const expected = itemsToProcess.find((item) => item.externalId === match.externalId);
+      if (!expected || expected.status !== "probable_match" || expected.matchedInventoryItemId !== match.inventoryItemId || confirmedProbable.has(match.externalId)) {
+        throw new Error("Confirmação provável divergente do preview aprovado.");
+      }
       confirmedProbable.set(match.externalId, match.inventoryItemId);
     }
   }
 
   // 1. Criar registro de sync run
-  const [syncRun] = await db
+  const [syncRun] = await tx
     .insert(syncRuns)
     .values({
       organizationId,
@@ -293,16 +347,13 @@ export async function commitCommerceImport(
   let updatedCount = 0;
   let skippedCount = 0;
   let conflictCount = 0;
-  let errorCount = 0;
+  const errorCount = 0;
   const errors: Array<{ externalId?: string; message: string }> = [];
 
-  try {
-    await db.transaction(async (tx) => {
       // Bloqueio por organização para integridade serializada
       await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${organizationId}, 0))`);
 
       for (const item of itemsToProcess) {
-        try {
           if (item.status === "insufficient_data") {
             skippedCount++;
             continue;
@@ -321,8 +372,7 @@ export async function commitCommerceImport(
               skippedCount++;
               continue; // Rejeitado ou não confirmado pelo lojista
             }
-            // Confirmado: tratar como vínculo e atualização
-            item.matchedInventoryItemId = confirmedInventoryId;
+            // O ID confirmado deve coincidir com o snapshot; não mutar o snapshot persistido.
           }
 
           const itemHash = createHash("sha256")
@@ -330,18 +380,21 @@ export async function commitCommerceImport(
             .digest("hex");
 
           if (item.matchedInventoryItemId) {
+            const [current] = await tx.select({
+              price: inventoryItems.price, cost: inventoryItems.cost, quantity: inventoryItems.quantity,
+              sku: inventoryItems.organizationSku,
+            }).from(inventoryItems).where(and(
+              eq(inventoryItems.id, item.matchedInventoryItemId),
+              eq(inventoryItems.organizationId, organizationId),
+            )).limit(1);
+            if (!current || Number(current.price) !== item.currentGeekPrice || Number(current.cost) !== item.currentCost || current.quantity !== item.currentStock || (item.sku && current.sku !== item.sku)) {
+              throw new Error(`Inventário alterado desde o preview para ${item.externalId}. Gere nova prévia.`);
+            }
             // Atualizar estoque do item existente (SOMENTE LEITURA em relação ao e-commerce)
             // Atualiza preço de venda se presente e estoque; NUNCA inventa ou sobrescreve custo se ausente
-            const updateFields: Record<string, unknown> = {
-              quantity: item.quantity,
-              updatedAt: new Date(),
-            };
-            if (item.price !== null && item.price > 0) {
-              updateFields.price = item.price.toFixed(2);
-            }
-            if (item.cost !== null && item.cost > 0) {
-              updateFields.cost = item.cost.toFixed(2);
-            }
+            const updateFields: Record<string, unknown> = { updatedAt: new Date() };
+            if (item.quantity !== null) updateFields.quantity = item.quantity;
+            // Preço e custo locais pertencem à política do lojista; importação atualiza só estoque.
 
             await tx
               .update(inventoryItems)
@@ -353,31 +406,27 @@ export async function commitCommerceImport(
                 )
               );
 
-            // Gravar ou atualizar mapeamento externo
-            await tx
-              .insert(externalProductMappings)
-              .values({
-                organizationId,
-                connectionId: input.connectionId,
-                inventoryItemId: item.matchedInventoryItemId,
-                externalId: item.externalId,
+            // Nunca reassociar silenciosamente um item já vinculado a outro produto externo.
+            const [existingMapping] = await tx.select().from(externalProductMappings).where(and(
+              eq(externalProductMappings.organizationId, organizationId),
+              eq(externalProductMappings.connectionId, input.connectionId),
+              eq(externalProductMappings.inventoryItemId, item.matchedInventoryItemId),
+            )).limit(1);
+            if (existingMapping && (existingMapping.externalId !== item.externalId || (existingMapping.externalVariantId ?? null) !== (item.externalVariantId ?? null))) {
+              throw new Error(`Mapeamento externo divergente para ${item.externalId}.`);
+            }
+            if (existingMapping) {
+              await tx.update(externalProductMappings).set({
+                sourceUpdatedAt: new Date(), lastImportedHash: itemHash, updatedAt: new Date(),
+              }).where(eq(externalProductMappings.id, existingMapping.id));
+            } else {
+              await tx.insert(externalProductMappings).values({
+                organizationId, connectionId: input.connectionId,
+                inventoryItemId: item.matchedInventoryItemId, externalId: item.externalId,
                 externalVariantId: item.externalVariantId || null,
-                sourceUpdatedAt: new Date(),
-                lastImportedHash: itemHash,
-              })
-              .onConflictDoUpdate({
-                target: [
-                  externalProductMappings.connectionId,
-                  externalProductMappings.externalId,
-                  externalProductMappings.externalVariantId,
-                ],
-                set: {
-                  inventoryItemId: item.matchedInventoryItemId,
-                  sourceUpdatedAt: new Date(),
-                  lastImportedHash: itemHash,
-                  updatedAt: new Date(),
-                },
+                sourceUpdatedAt: new Date(), lastImportedHash: itemHash,
               });
+            }
 
             updatedCount++;
           } else if (item.status === "new_product") {
@@ -390,7 +439,8 @@ export async function commitCommerceImport(
               })
               .returning({ id: products.id });
 
-            const scopedSku = organizationScopedSku(organizationId, item.sku || `EXT-${item.externalId}`);
+            const fallbackSku = `EXT-${item.externalId}${item.externalVariantId ? `-${item.externalVariantId}` : ""}`;
+            const scopedSku = organizationScopedSku(organizationId, item.sku || fallbackSku);
 
             const [newVariant] = await tx
               .insert(productVariants)
@@ -413,10 +463,10 @@ export async function commitCommerceImport(
               .values({
                 organizationId,
                 variantId: newVariant.id,
-                organizationSku: item.sku || `EXT-${item.externalId}`,
+                organizationSku: item.sku || fallbackSku,
                 cost: initialCost,
                 price: initialPrice,
-                quantity: item.quantity,
+                quantity: item.quantity ?? 0,
                 desiredMarginPercent: "25.00",
               })
               .returning({ id: inventoryItems.id });
@@ -433,21 +483,13 @@ export async function commitCommerceImport(
             });
 
             createdCount++;
-          }
-        } catch (itemErr: unknown) {
-          errorCount++;
-          errors.push({
-            externalId: item.externalId,
-            message: itemErr instanceof Error ? itemErr.message : String(itemErr),
-          });
         }
       }
-    });
 
     const finalStatus: "completed" | "partial" | "failed" =
       errorCount > 0 && createdCount + updatedCount > 0 ? "partial" : errorCount > 0 ? "failed" : "completed";
 
-    await db
+    await tx
       .update(syncRuns)
       .set({
         status: finalStatus,
@@ -461,7 +503,7 @@ export async function commitCommerceImport(
       })
       .where(eq(syncRuns.id, syncRun.id));
 
-    await db
+    await tx
       .update(integrationConnections)
       .set({
         lastSyncedAt: new Date(),
@@ -469,8 +511,9 @@ export async function commitCommerceImport(
       })
       .where(eq(integrationConnections.id, input.connectionId));
 
-    // Limpar preview após uso
-    previewCache.delete(input.previewToken);
+    await tx.update(commercePreviews).set({
+      status: "committed", consumedAt: new Date(), importRunId: syncRun.id,
+    }).where(eq(commercePreviews.id, preview.id));
 
     return {
       syncRunId: syncRun.id,
@@ -482,17 +525,5 @@ export async function commitCommerceImport(
       errorCount,
       errors,
     };
-  } catch (fatalErr: unknown) {
-    await db
-      .update(syncRuns)
-      .set({
-        status: "failed",
-        errorCount: errorCount + 1,
-        errors: [{ message: fatalErr instanceof Error ? fatalErr.message : String(fatalErr) }],
-        completedAt: new Date(),
-      })
-      .where(eq(syncRuns.id, syncRun.id));
-
-    throw fatalErr;
-  }
+  });
 }

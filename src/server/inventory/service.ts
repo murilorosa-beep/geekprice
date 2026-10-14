@@ -67,10 +67,11 @@ export async function listAllInventory(organizationId: string) {
 
 export async function listInventoryChunk(
   organizationId: string,
-  options: { limit: number; offset: number }
+  options: { limit: number; offset?: number; afterId?: string | null }
 ) {
   const freshSince = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const where = eq(inventoryItems.organizationId, organizationId);
+  const where = and(eq(inventoryItems.organizationId, organizationId),
+    options.afterId ? gt(inventoryItems.id, options.afterId) : undefined);
   const market = db
     .select({
       variantId: externalListings.variantId,
@@ -124,7 +125,7 @@ export async function listInventoryChunk(
     .where(where)
     .orderBy(asc(inventoryItems.id))
     .limit(options.limit)
-    .offset(options.offset);
+    .offset(options.offset ?? 0);
 
   return rows.map((row) => ({
     ...row,
