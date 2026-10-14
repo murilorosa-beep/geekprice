@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { MarketMyCards } from "@/components/market-my-cards";
 import { BrlMarketImport } from "@/components/brl-market-import";
 import { SmartRegistrationModal } from "@/components/smart-registration-modal";
+import { BrazilianQuoteModal } from "@/components/brazilian-quote-modal";
 import {
   AlertCircle,
   BookOpen,
@@ -16,6 +17,7 @@ import {
   Package,
   Plus,
   Search,
+  Sparkles,
 } from "lucide-react";
 
 type Card = {
@@ -84,6 +86,7 @@ export function MarketExplorer({ canManage }: { canManage: boolean }) {
   const [error, setError] = useState("");
   const [feedback, setFeedback] = useState("");
   const [showGuide, setShowGuide] = useState(false);
+  const [quoteModalData, setQuoteModalData] = useState<{ name: string; edition?: string | null; number?: string | null } | null>(null);
   const productsWithQuotes = Array.from(groups.reduce((byItem, quote) => {
     const existing = byItem.get(quote.inventoryItemId) ?? [];
     existing.push(quote);
@@ -327,7 +330,21 @@ export function MarketExplorer({ canManage }: { canManage: boolean }) {
                 ? `Possui ${detail.prices.length} cotações de mercado disponíveis nesta edição.`
                 : "Sem cotações internacionais diretas cadastradas para esta edição específica."}
             </p>
-            {canManage && <button type="button" className="primary small" onClick={() => setRegisterCard({ id: detail.id, language })}><Plus size={16}/> Adicionar esta edição ao meu estoque</button>}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+              {canManage && <button type="button" className="primary small" onClick={() => setRegisterCard({ id: detail.id, language })}><Plus size={16}/> Adicionar esta edição ao meu estoque</button>}
+              <button
+                type="button"
+                className="secondary small"
+                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                onClick={() => setQuoteModalData({
+                  name: detail.name,
+                  edition: detail.setName,
+                  number: detail.localId,
+                })}
+              >
+                <Sparkles size={15} style={{ color: "#10b981" }} /> Cotação BR (Liga Pokémon)
+              </button>
+            </div>
           </div>
 
           {/* Se o estoque da loja estiver vazio, orienta o lojista com clareza */}
@@ -530,6 +547,17 @@ export function MarketExplorer({ canManage }: { canManage: boolean }) {
       )}
       {canManage && <BrlMarketImport />}
       </>}
+      {quoteModalData && (
+        <BrazilianQuoteModal
+          cardName={quoteModalData.name}
+          edition={quoteModalData.edition}
+          collectorNumber={quoteModalData.number}
+          inventoryItemId={stockId || null}
+          inventoryItemName={stock.find((s) => s.id === stockId)?.name}
+          onClose={() => setQuoteModalData(null)}
+          onQuoteSaved={loadMarket}
+        />
+      )}
     </div>
   );
 }
