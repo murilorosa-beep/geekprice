@@ -422,15 +422,15 @@ export async function applyPriceBatch(
   let targetItems: AutopilotItemView[] = [];
 
   if (input.applyAllSafe) {
-    targetItems = queue.safe.filter((item) => item.cost > 0 && item.currentPrice > 0 && item.suggestedPrice > 0 && Math.abs(item.priceDifference) >= 0.01);
+    targetItems = queue.safe.filter((item) => item.cost > 0 && item.currentPrice > 0 && item.suggestedPrice > 0 && (item.marketPrice ?? 0) > 0 && Math.abs(item.priceDifference) >= 0.01);
   } else if (input.itemIds && input.itemIds.length > 0) {
     const idSet = new Set(input.itemIds);
     const combined = [...queue.safe, ...queue.flagged];
-    targetItems = combined.filter((item) => idSet.has(item.id) && item.cost > 0 && item.currentPrice > 0 && item.suggestedPrice > 0 && item.safetyGate !== "margin_below_minimum" && Math.abs(item.priceDifference) >= 0.01);
+    targetItems = combined.filter((item) => idSet.has(item.id) && item.cost > 0 && item.currentPrice > 0 && item.suggestedPrice > 0 && (item.marketPrice ?? 0) > 0 && item.safetyGate !== "margin_below_minimum" && Math.abs(item.priceDifference) >= 0.01);
     if (targetItems.length !== idSet.size) {
       return {
         success: false,
-        message: "A seleção mudou ou contém produto sem dados suficientes. Atualize as sugestões e revise os itens antes de confirmar; nenhum preço foi alterado.",
+        message: "A seleção mudou ou contém produto sem cotação BRL recente ou dados suficientes. Atualize as sugestões e revise os itens antes de confirmar; nenhum preço foi alterado.",
         batch: null,
       };
     }

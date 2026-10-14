@@ -26,6 +26,8 @@ export async function listInventory(organizationId: string, query: z.infer<typeo
       code: productVariants.collectorNumber, sku: sql<string>`coalesce(${inventoryItems.organizationSku}, ${productVariants.sku})`, cost: inventoryItems.cost, currentPrice: inventoryItems.price,
       stock: inventoryItems.quantity, desiredMarginPercent: inventoryItems.desiredMarginPercent, marketPrice: market.marketPrice,
       language: productVariants.language, condition: productVariants.condition, finish: productVariants.finish, rarity: productVariants.rarity,
+      catalogSource: productVariants.catalogSource, canonicalId: productVariants.canonicalId,
+      catalogLinked: sql<boolean>`exists (select 1 from external_listings el join sources s on s.id = el.source_id where el.variant_id = ${productVariants.id} and s.organization_id = ${organizationId} and s.kind in ('tcgdex', 'scryfall'))`,
     }).from(inventoryItems).innerJoin(productVariants, eq(productVariants.id, inventoryItems.variantId))
       .innerJoin(products, eq(products.id, productVariants.productId)).leftJoin(market, eq(market.variantId, productVariants.id))
       .where(where).orderBy(asc(products.name)).limit(query.pageSize).offset((query.page - 1) * query.pageSize),

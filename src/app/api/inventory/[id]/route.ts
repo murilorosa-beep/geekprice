@@ -1,9 +1,18 @@
 import { z } from "zod";
 import { requireOrganization, authErrorResponse } from "@/server/auth/context";
-import { deleteInventoryItem, updateInventoryItem } from "@/server/inventory/service";
+import { deleteInventoryItem, listAllInventory, updateInventoryItem } from "@/server/inventory/service";
 import { inventoryUpdateSchema } from "@/server/inventory/schemas";
 
 const idSchema = z.uuid();
+
+export async function GET(_request: Request, context: RouteContext<"/api/inventory/[id]">) {
+  try {
+    const actor = await requireOrganization();
+    const { id } = await context.params;
+    const item = (await listAllInventory(actor.organizationId)).items.find((candidate) => candidate.id === idSchema.parse(id));
+    return item ? Response.json(item) : Response.json({ error: "Item não encontrado." }, { status: 404 });
+  } catch (error) { return authErrorResponse(error); }
+}
 
 export async function PATCH(request: Request, context: RouteContext<"/api/inventory/[id]">) {
   try {

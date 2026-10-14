@@ -24,7 +24,7 @@ import type {
 } from "@/server/autopilot/service";
 
 const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
-const canApply = (item: AutopilotItemView) => item.cost > 0 && item.currentPrice > 0 && item.suggestedPrice > 0 && item.safetyGate !== "margin_below_minimum" && Math.abs(item.priceDifference) >= 0.01;
+const canApply = (item: AutopilotItemView) => item.cost > 0 && item.currentPrice > 0 && item.suggestedPrice > 0 && (item.marketPrice ?? 0) > 0 && item.safetyGate !== "margin_below_minimum" && Math.abs(item.priceDifference) >= 0.01;
 const statusLabel = (item: AutopilotItemView) => {
   if (item.safetyGate === "missing_cost") return "Cadastre o custo";
   if (item.safetyGate === "missing_current_price") return "Cadastre o preço";
@@ -513,7 +513,7 @@ export function AutopilotView({
                     </th>
                     <th>CARTA / PRODUTO</th>
                     <th>PREÇO ATUAL</th>
-                    <th>SUGESTÃO</th>
+                    <th>VALOR CALCULADO</th>
                     <th>POR QUÊ?</th>
                     <th style={{ textAlign: "right" }}>AÇÃO</th>
                   </tr>
@@ -558,7 +558,7 @@ export function AutopilotView({
                         <td>{money.format(item.currentPrice)}</td>
                         <td>
                           <strong className="seller-suggested">{money.format(item.suggestedPrice)}</strong>
-                          <span className="seller-delta">{item.currentPrice <= 0 ? "Preço atual não cadastrado" : `${item.percentageChange >= 0 ? "+" : ""}${item.percentageChange.toFixed(1)}% em relação ao atual`}</span>
+                          <span className="seller-delta">{item.marketPrice == null ? "Simulação por custo; não aplicável" : item.currentPrice <= 0 ? "Preço atual não cadastrado" : `${item.percentageChange >= 0 ? "+" : ""}${item.percentageChange.toFixed(1)}% em relação ao atual`}</span>
                         </td>
                         <td>
                           <span className={`safety-pill ${item.safetyStatus}`}>{statusLabel(item)}</span>
@@ -602,13 +602,13 @@ export function AutopilotView({
         <button type="button" className="drawer-close" onClick={() => setReviewItem(null)} aria-label="Fechar revisão">×</button>
         <p className="eyebrow">DECISÃO DE PREÇO · BALCÃO FÍSICO</p>
         <div className="seller-review-heading">{reviewItem.imageUrl && /^https:\/\//i.test(reviewItem.imageUrl) ? <img className="product-art large" src={reviewItem.imageUrl} alt={`Carta ${reviewItem.name}`}/> : <div className="product-art-placeholder large">{reviewItem.name.slice(0, 2).toUpperCase()}</div>}<div><h2>{reviewItem.name}</h2><p>{reviewItem.set ?? reviewItem.category} · SKU {reviewItem.sku}</p><span className={`safety-pill ${reviewItem.safetyStatus}`}>{statusLabel(reviewItem)}</span></div></div>
-        <div className="seller-review-prices"><div><span>Preço atual</span><strong>{money.format(reviewItem.currentPrice)}</strong></div><div><span>Sugestão</span><strong>{money.format(reviewItem.suggestedPrice)}</strong></div></div>
+        <div className="seller-review-prices"><div><span>Preço atual no estoque</span><strong>{money.format(reviewItem.currentPrice)}</strong></div><div><span>{reviewItem.marketPrice == null ? "Simulação por custo e margem" : "Sugestão com referência BRL"}</span><strong>{money.format(reviewItem.suggestedPrice)}</strong></div></div>
         <p className="seller-review-reason">{reviewItem.safetyReason}</p>
         <div className="seller-review-facts"><div><span>Custo de aquisição</span><strong>{money.format(reviewItem.cost)}</strong></div><div><span>Piso mínimo calculado</span><strong>{money.format(reviewItem.minimumPrice)}</strong></div><div><span>Referência BRL</span><strong>{reviewItem.marketPrice == null ? "Não disponível" : money.format(reviewItem.marketPrice)}</strong></div><div><span>Margem projetada</span><strong>{reviewItem.projectedMargin.toFixed(1)}%</strong></div></div>
-        {reviewItem.safetyStatus === "suspicious_flagged" && <p className="seller-review-warning">Esta sugestão exige revisão humana. Não será aplicada automaticamente.</p>}
-        <div className="seller-review-actions"><Link href="/products" className="secondary">Ver produtos</Link><Link href="/market" className="secondary">Ver mercado</Link><button type="button" className="primary" disabled={loading || !canManagePrices || channel !== "counter" || !canApply(reviewItem)} onClick={() => handleApplySingle(reviewItem.id)}>Confirmar preço no balcão</button></div>
+        {reviewItem.marketPrice == null ? <p className="seller-review-warning">Este valor é apenas uma simulação matemática. Sem cotação brasileira recente, o Autopilot não altera seu preço — mesmo com confirmação manual. Seu preço atual permanece como está.</p> : reviewItem.safetyStatus === "suspicious_flagged" && <p className="seller-review-warning">Esta sugestão exige revisão humana. Não será aplicada automaticamente.</p>}
+        <div className="seller-review-actions"><Link href="/products" className="secondary">Ver produtos</Link><Link href="/market" className="secondary">Ver mercado</Link>{reviewItem.marketPrice == null ? canManagePrices && <Link href={`/products?edit=${reviewItem.id}`} className="primary">Editar preço manualmente</Link> : <button type="button" className="primary" disabled={loading || !canManagePrices || channel !== "counter" || !canApply(reviewItem)} onClick={() => handleApplySingle(reviewItem.id)}>Alterar preço do estoque para {money.format(reviewItem.suggestedPrice)}</button>}</div>
         {channel !== "counter" && <p className="muted">Loja virtual e marketplace estão em modo de simulação; nenhum preço é publicado nesses canais.</p>}
-        {!canApply(reviewItem) && channel === "counter" && <p className="muted">A aplicação fica disponível após corrigir os dados ou quando existir diferença real entre os preços.</p>}
+        {!canApply(reviewItem) && channel === "counter" && <p className="muted">{reviewItem.marketPrice == null ? "Cadastre ou vincule uma referência BRL recente no Mercado para liberar uma sugestão aplicável. A referência internacional sozinha não libera alteração de preço." : "A aplicação fica disponível após corrigir os dados ou quando existir diferença real entre os preços."}</p>}
       </section></div>}
 
       {/* TAB 2: REGRAS & ESTRATÉGIAS */}

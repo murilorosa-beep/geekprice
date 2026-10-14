@@ -1,9 +1,9 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { inventoryItems, loginAttempts, memberships, organizations, priceChangeHistory, productVariants, publicActionLimits, sources, users } from "@/db/schema";
+import { externalListings, inventoryItems, loginAttempts, memberships, organizations, priceChangeHistory, productVariants, publicActionLimits, sources, users } from "@/db/schema";
 import { assertPublicActionAllowed } from "@/server/auth/public-rate-limit";
 import { AutopilotBusyError, runAutopilotReevaluationCycle } from "@/server/autopilot/worker";
 import { createPricingRule } from "@/server/autopilot/service";
@@ -13,7 +13,8 @@ import { inventoryInputSchema } from "@/server/inventory/schemas";
 import { importBrlMarketReferences } from "@/server/market/partner-import";
 import { brlMarketRowSchema, parseBrlMarketCsv } from "@/server/market/partner-csv";
 import { getOrganizationMarketHistory } from "@/server/market/history";
-import { getMarketData } from "@/server/market/service";
+import { getMarketData, linkAndCollect } from "@/server/market/service";
+import { tcgdexConnector } from "@/server/market/tcgdex";
 import { hashPassword } from "@/server/auth/password";
 import { assertLoginAllowed, clearLoginFailures, getLoginOriginHash, recordLoginFailure } from "@/server/auth/rate-limit";
 import { authOptions } from "@/server/auth/options";
@@ -149,6 +150,22 @@ describe("PostgreSQL Supabase isolated integration", () => {
     expect(history.summary?.totalObservations).toBe(2);
   });
 
+  it("keeps separate catalogue links for conditions of the same card", async () => {
+    const first = await createInventoryItem(orgA, input("TESTE_SINTETICO Carta NM", "LINK-NM"));
+    const second = await createInventoryItem(orgA, { ...input("TESTE_SINTETICO Carta Played", "LINK-PLAYED"), condition: "played" });
+    const getCard = vi.spyOn(tcgdexConnector, "getCard").mockResolvedValue({ id: "synthetic-1", name: "TESTE_SINTETICO Carta", localId: "1", setId: "synthetic", setName: "Synthetic", rarity: null, image: null, language: "pt-br", finishes: [], prices: [] });
+    try {
+      await linkAndCollect(orgA, { inventoryItemId: first.id, externalCardId: "synthetic-1", language: "pt-br" });
+      await linkAndCollect(orgA, { inventoryItemId: second.id, externalCardId: "synthetic-1", language: "pt-br" });
+      const source = (await db.select().from(sources).where(eq(sources.organizationId, orgA))).find((row) => row.kind === "tcgdex")!;
+      const links = await db.select().from(externalListings).where(eq(externalListings.sourceId, source.id));
+      expect(links.map((link) => link.variantId)).toEqual(expect.arrayContaining([first.variantId, second.variantId]));
+      expect(new Set(links.map((link) => link.externalId)).size).toBe(links.length);
+    } finally {
+      getCard.mockRestore();
+    }
+  });
+
   it("calculates persisted recommendations against independently derived profitable floors", async () => {
     await upsertActivePricingPolicy(orgA, pricingPolicySchema.parse({ name: "TESTE_SINTETICO", feePercent: 10, additionalCostPercent: 5, minimumMarginPercent: 20, desiredMarginPercent: 25, marketDiscountPercent: 0 }));
     await refreshRecommendations(orgA);
@@ -189,6 +206,18 @@ describe("PostgreSQL Supabase isolated integration", () => {
     expect(result.success).toBe(false);
     expect(result.message).toContain("nenhum preço foi alterado");
     expect((await listAllInventory(orgA)).items.find((item) => item.id === itemA)!.currentPrice).toBe(before);
+  });
+
+  it("never applies a cost-only simulation without a recent Brazilian market reference", async () => {
+    const before = (await listAllInventory(orgB)).items.find((item) => item.id === itemB)!.currentPrice;
+    const queue = await getAutopilotQueue(orgB);
+    const candidate = [...queue.safe, ...queue.flagged, ...queue.unchanged].find((item) => item.id === itemB)!;
+    expect(candidate.marketPrice).toBeNull();
+    expect(candidate.safetyGate).toBe("missing_market_reference");
+    const result = await applyPriceBatch(orgB, null, { channel: "counter", itemIds: [itemB], applyAllSafe: false });
+    expect(result.success).toBe(false);
+    expect(result.message).toContain("sem cotação BRL");
+    expect((await listAllInventory(orgB)).items.find((item) => item.id === itemB)!.currentPrice).toBe(before);
   });
 
   it("rate limits distributed account attempts and recovers after expiry", async () => {

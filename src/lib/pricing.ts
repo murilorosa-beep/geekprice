@@ -134,7 +134,7 @@ export function calculateRecommendation(input: PricingInput): PricingResult {
   const desiredFloorDecimal = cost.div(desiredDenominator);
 
   const marketMultiplier = new Decimal(1).minus(new Decimal(input.marketDiscountPercent ?? 2).div(100));
-  const marketTarget = input.marketPrice == null ? null : new Decimal(input.marketPrice).mul(marketMultiplier);
+  const marketTarget = input.marketPrice == null || input.marketPrice <= 0 ? null : new Decimal(input.marketPrice).mul(marketMultiplier);
 
   let rawSuggestedDecimal = marketTarget == null || desiredFloorDecimal.gt(marketTarget)
     ? desiredFloorDecimal
@@ -179,7 +179,7 @@ export function calculateRecommendation(input: PricingInput): PricingResult {
     safetyGate = "missing_current_price";
     safetyFlag = "Informe o preço de venda atual para comparar a sugestão com segurança.";
     safetyReason = safetyFlag;
-  } else if (input.marketPrice == null) {
+  } else if (input.marketPrice == null || input.marketPrice <= 0) {
     safetyStatus = "suspicious_flagged";
     safetyGate = "missing_market_reference";
     safetyFlag = "Sem cotação externa de mercado: cálculo restrito a custo, taxas e margem desejada.";

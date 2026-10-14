@@ -3,6 +3,9 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { MarketMyCards } from "@/components/market-my-cards";
+import { BrlMarketImport } from "@/components/brl-market-import";
+import { SmartRegistrationModal } from "@/components/smart-registration-modal";
 import {
   AlertCircle,
   BookOpen,
@@ -62,7 +65,9 @@ type Group = {
   history: Array<{ price: number; referenceAt: string; source: string }>;
 };
 
-export function MarketExplorer() {
+export function MarketExplorer({ canManage }: { canManage: boolean }) {
+  const [activeTab, setActiveTab] = useState<"mine" | "catalog">("mine");
+  const [registerCard, setRegisterCard] = useState<{ id: string; language: string } | null>(null);
   const [name, setName] = useState("");
   const [collection, setCollection] = useState("");
   const [number, setNumber] = useState("");
@@ -146,7 +151,7 @@ export function MarketExplorer() {
     const b = await r.json();
     setLoading(false);
     if (!r.ok) return setError(b.error ?? "Não foi possível associar.");
-    setFeedback(`✓ Associação concluída! Carta vinculada ao produto do seu estoque com ${b.observationsInserted ?? 0} nova(s) cotação(ões) registrada(s). O Autopilot agora monitorará este produto.`);
+    setFeedback(`✓ Edição associada ao estoque com ${b.observationsInserted ?? 0} nova(s) referência(s) internacional(is). Para liberar recomendação aplicável, ainda é necessária uma cotação brasileira recente em BRL.`);
     await loadMarket();
   }
 
@@ -156,14 +161,32 @@ export function MarketExplorer() {
         <div>
           <p className="eyebrow">INTELIGÊNCIA DE PREÇOS</p>
           <h1>Mercado</h1>
-          <p>Consulte referências de preço oficiais e vincule suas cartas aos dados mundiais.</p>
+          <p>Veja suas cartas cadastradas, compare preços em reais e confirme a edição correta antes de decidir.</p>
         </div>
       </div>
 
       {feedback && <div className="feedback">{feedback}</div>}
       {error && <div className="form-error">{error}</div>}
+      {registerCard && <SmartRegistrationModal
+        initialCard={registerCard}
+        onClose={() => setRegisterCard(null)}
+        onCreated={async () => {
+          const response = await fetch("/api/inventory?pageSize=100");
+          const body = await response.json();
+          if (response.ok) setStock(body.items ?? []);
+          await loadMarket();
+          setActiveTab("mine");
+          setFeedback("Carta adicionada ao estoque com a edição escolhida. Confira seus detalhes e preço em Minhas cartas.");
+        }}
+      />}
 
-      {!showGuide && <div className="market-guide-summary"><HelpCircle size={18}/><span><strong>Comece pelo catálogo.</strong> Encontre a edição da carta, vincule ao estoque e veja as cotações abaixo.</span><button type="button" className="secondary small" onClick={() => setShowGuide(true)}>Ver passo a passo</button></div>}
+      <div className="market-tabs" role="tablist" aria-label="Mercado">
+        <button type="button" role="tab" aria-selected={activeTab === "mine"} className={activeTab === "mine" ? "active" : ""} onClick={() => setActiveTab("mine")}>Minhas cartas e preços</button>
+        <button type="button" role="tab" aria-selected={activeTab === "catalog"} className={activeTab === "catalog" ? "active" : ""} onClick={() => setActiveTab("catalog")}>Buscar edição no catálogo</button>
+      </div>
+      {activeTab === "mine" ? <MarketMyCards canManage={canManage} onSearchEdition={(item) => { setStockId(item.id); setStock((current) => current.some((stockItem) => stockItem.id === item.id) ? current : [...current, { id: item.id, name: item.name, sku: item.sku, set: item.set }]); setName(item.name); setCollection(item.set ?? ""); setNumber(item.code ?? ""); setLanguage(item.language.toLowerCase()); setActiveTab("catalog"); setShowGuide(false); }}/> : <>
+
+      {!showGuide && <div className="market-guide-summary"><HelpCircle size={18}/><span><strong>Para produtos manuais:</strong> encontre a edição exata, vincule ao estoque e veja as referências disponíveis. Referências em USD/EUR não liberam mudança de preço.</span><button type="button" className="secondary small" onClick={() => setShowGuide(true)}>Ver passo a passo</button></div>}
       {/* GUIA EXPLICATIVO PARA O LOJISTA */}
       {showGuide && (
         <section
@@ -207,7 +230,7 @@ export function MarketExplorer() {
                       <CheckCircle2 size={14} /> 3. Deixe o Autopilot Sugerir
                     </strong>
                     <span style={{ fontSize: "0.82rem", color: "var(--muted-foreground)" }}>
-                      Com a associação feita, o Autopilot analisa se seu preço está ideal e avisa você.
+                      Com uma cotação brasileira recente em BRL, o Autopilot pode gerar uma sugestão aplicável. Sem ela, mostra apenas a simulação por custo.
                     </span>
                   </div>
                 </div>
@@ -281,9 +304,8 @@ export function MarketExplorer() {
               <button key={c.id} className="catalog-card" onClick={() => select(c)}>
                 {c.image ? <img src={c.image} alt="" /> : <span>{c.name.slice(0, 2)}</span>}
                 <strong>{c.name}</strong>
-                <small>
-                  {c.id} · nº {c.localId ?? "—"}
-                </small>
+                <small>{c.id} · nº {c.localId ?? "—"}</small>
+                <small className="catalog-card-action">Ver edição e adicionar →</small>
               </button>
             ))}
           </div>
@@ -295,6 +317,7 @@ export function MarketExplorer() {
         <section className="panel detail-market" style={{ borderLeft: "4px solid #10b981" }}>
           <div>
             <p className="eyebrow" style={{ color: "#10b981" }}>EDIÇÃO SELECIONADA</p>
+            {detail.image && <img className="market-selected-art" src={detail.image} alt={`Carta ${detail.name}`} />}
             <h2>{detail.name}</h2>
             <p style={{ margin: "4px 0 8px 0" }}>
               Coleção: <strong>{detail.setName ?? "Não informada"}</strong> · Número: <strong>{detail.localId ?? "—"}</strong> · Raridade: <strong>{detail.rarity ?? "Padrão"}</strong>
@@ -304,6 +327,7 @@ export function MarketExplorer() {
                 ? `Possui ${detail.prices.length} cotações de mercado disponíveis nesta edição.`
                 : "Sem cotações internacionais diretas cadastradas para esta edição específica."}
             </p>
+            {canManage && <button type="button" className="primary small" onClick={() => setRegisterCard({ id: detail.id, language })}><Plus size={16}/> Adicionar esta edição ao meu estoque</button>}
           </div>
 
           {/* Se o estoque da loja estiver vazio, orienta o lojista com clareza */}
@@ -504,6 +528,8 @@ export function MarketExplorer() {
           </div>
         </section>
       )}
+      {canManage && <BrlMarketImport />}
+      </>}
     </div>
   );
 }
