@@ -460,35 +460,41 @@ describe("Fase 9 — Testes de Integração com PostgreSQL Real Isolado", () => 
 
   it("persiste cotação BRL no PostgreSQL, bloqueia divergências de edição, rejeita tokens inválidos e aciona trava do Autopilot", async () => {
     // 1. Cadastrar duas variantes do mesmo nome com edições diferentes na orgA
-    const item151 = await createInventoryItem(orgA, {
-      name: `Charizard Teste BRL ${run}`,
-      category: "tcg_pokemon",
-      setName: "151",
-      collectorNumber: "006",
-      sku: `PKM-CHAR-151-${run}`,
-      cost: 100,
-      price: 200,
-      quantity: 5,
-      desiredMarginPercent: 25,
-      language: "pt-BR",
-      condition: "near_mint",
-      finish: "standard",
-    });
+    const item151 = await createInventoryItem(
+      orgA,
+      inventoryInputSchema.parse({
+        name: `Charizard Teste BRL ${run}`,
+        category: "tcg_pokemon",
+        setName: "151",
+        collectorNumber: "006",
+        sku: `PKM-CHAR-151-${run}`,
+        cost: 100,
+        price: 200,
+        quantity: 5,
+        desiredMarginPercent: 25,
+        language: "pt-BR",
+        condition: "near_mint",
+        finish: "standard",
+      })
+    );
 
-    const itemDestinos = await createInventoryItem(orgA, {
-      name: `Charizard Teste BRL ${run}`,
-      category: "tcg_pokemon",
-      setName: "Destinos Brilhantes",
-      collectorNumber: "006",
-      sku: `PKM-CHAR-DEST-${run}`,
-      cost: 80,
-      price: 160,
-      quantity: 3,
-      desiredMarginPercent: 25,
-      language: "pt-BR",
-      condition: "near_mint",
-      finish: "standard",
-    });
+    const itemDestinos = await createInventoryItem(
+      orgA,
+      inventoryInputSchema.parse({
+        name: `Charizard Teste BRL ${run}`,
+        category: "tcg_pokemon",
+        setName: "Destinos Brilhantes",
+        collectorNumber: "006",
+        sku: `PKM-CHAR-DEST-${run}`,
+        cost: 80,
+        price: 160,
+        quantity: 3,
+        desiredMarginPercent: 25,
+        language: "pt-BR",
+        condition: "near_mint",
+        finish: "standard",
+      })
+    );
 
     // 2. Criar cotação assinada para a edição 151
     const quote151 = {
