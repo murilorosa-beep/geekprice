@@ -1,8 +1,19 @@
 # GeekPrice — situação do projeto
 
-## Estado atual — Fase 8.2 (14/10/2026)
+## Estado atual — Fase 9 (14/10/2026)
 
-O estado técnico vigente está em [PHASE8_2_FINAL_VALIDATION.md](PHASE8_2_FINAL_VALIDATION.md). O Supabase PostgreSQL 17.11 tem migrations `0000`–`0012` aplicadas; os fluxos de isolamento, importação BRL, recomendações, Autopilot supervisionado e rollback foram verificados em banco isolado, HTTP e navegador. O gráfico histórico usa dados PostgreSQL reais ou estado vazio. Git local foi inicializado sem publicação. O texto abaixo preserva o histórico das fases anteriores e não deve ser usado como diagnóstico atual do banco, testes ou dependências.
+O estado técnico vigente está documentado em [PHASE9_PILOT_READINESS_REPORT.md](PHASE9_PILOT_READINESS_REPORT.md). A Fase 9 preparou o GeekPrice para pilotos comerciais assistidos (read-only):
+- **Staging & Segurança:** Guardas ativas em runtime (`src/server/environment.ts`) bloqueando testes destrutivos no banco comercial; arquitetura em `docs/STAGING_ENVIRONMENT.md`.
+- **Worker Autopilot Escalável:** Paginação em chunks, limites por organização/ciclo, orçamento de tempo (`maxExecutionTimeMs`), checkpoints persistentes com retomada e métricas de memória Node.js.
+- **Primeira Integração Real (WooCommerce):** Conector REST v3 com HTTPS obrigatório, credenciais cifradas em repouso com AES-256-GCM, parser inteligente de metadados TCG.
+- **Motor de Conciliação Inteligente:** Classificação estrita em 5 estados com preview assinado via HMAC-SHA256 (15 min) e commit transacional.
+- **Fontes de Mercado BRL:** Estratégia oficial documentada em `docs/BRAZILIAN_MARKET_INTELLIGENCE.md` (Mercado Livre API, feeds parceiros, MSRP oficial, quarentena estatística).
+- **Playbook do Piloto Comercial:** Guia completo de 4 semanas para 3–5 lojistas em `docs/PILOT_PROGRAM_PLAYBOOK.md`.
+- **Testes & Qualidade:** 80 testes unitários aprovados (24 arquivos), 27 testes de integração com PostgreSQL real isolado (Supabase 17.11) aprovados, typecheck e lint zerados, build Next.js com 69 rotas compiladas com sucesso.
+
+## Estado anterior — Fase 8.2 (14/10/2026)
+
+O estado técnico da Fase 8.2 está em [PHASE8_2_FINAL_VALIDATION.md](PHASE8_2_FINAL_VALIDATION.md). O Supabase PostgreSQL 17.11 tem migrations `0000`–`0012` aplicadas; os fluxos de isolamento, importação BRL, recomendações, Autopilot supervisionado e rollback foram verificados em banco isolado, HTTP e navegador. O gráfico histórico usa dados PostgreSQL reais ou estado vazio. Git local foi inicializado sem publicação.
 
 ## Histórico das fases anteriores
 

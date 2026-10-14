@@ -18,7 +18,6 @@ async function handleCron(request: Request) {
     return Response.json({ error: "Não autorizado." }, { status: 401 });
   }
 
-  const start = Date.now();
   let result;
   try {
     result = await runAutopilotReevaluationCycle();
@@ -29,11 +28,9 @@ async function handleCron(request: Request) {
     console.error("Falha no ciclo do Autopilot:", error);
     return Response.json({ error: "Falha na execução do Autopilot." }, { status: 500 });
   }
-  const durationMs = Date.now() - start;
 
   return Response.json({
     success: true,
-    durationMs,
     ...result,
   });
 }

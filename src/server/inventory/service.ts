@@ -65,6 +65,76 @@ export async function listAllInventory(organizationId: string) {
   return { items, total: items.length, page: 1, pageSize: items.length };
 }
 
+export async function listInventoryChunk(
+  organizationId: string,
+  options: { limit: number; offset: number }
+) {
+  const freshSince = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const where = eq(inventoryItems.organizationId, organizationId);
+  const market = db
+    .select({
+      variantId: externalListings.variantId,
+      marketPrice: sql<string>`avg(${priceObservations.price})`.as("market_price"),
+    })
+    .from(externalListings)
+    .innerJoin(
+      sources,
+      and(eq(sources.id, externalListings.sourceId), eq(sources.organizationId, organizationId), eq(sources.active, true))
+    )
+    .innerJoin(
+      priceObservations,
+      and(
+        eq(priceObservations.listingId, externalListings.id),
+        eq(priceObservations.available, true),
+        eq(priceObservations.currency, "BRL"),
+        eq(priceObservations.region, "BR"),
+        eq(priceObservations.type, "reference"),
+        gte(priceObservations.referenceAt, freshSince)
+      )
+    )
+    .innerJoin(
+      inventoryItems,
+      and(eq(inventoryItems.variantId, externalListings.variantId), eq(inventoryItems.organizationId, organizationId))
+    )
+    .groupBy(externalListings.variantId)
+    .as("market");
+
+  const rows = await db
+    .select({
+      id: inventoryItems.id,
+      name: products.name,
+      category: products.category,
+      set: productVariants.setName,
+      code: productVariants.collectorNumber,
+      sku: sql<string>`coalesce(${inventoryItems.organizationSku}, ${productVariants.sku})`,
+      cost: inventoryItems.cost,
+      currentPrice: inventoryItems.price,
+      stock: inventoryItems.quantity,
+      desiredMarginPercent: inventoryItems.desiredMarginPercent,
+      marketPrice: market.marketPrice,
+      language: productVariants.language,
+      condition: productVariants.condition,
+      finish: productVariants.finish,
+      rarity: productVariants.rarity,
+    })
+    .from(inventoryItems)
+    .innerJoin(productVariants, eq(productVariants.id, inventoryItems.variantId))
+    .innerJoin(products, eq(products.id, productVariants.productId))
+    .leftJoin(market, eq(market.variantId, productVariants.id))
+    .where(where)
+    .orderBy(asc(inventoryItems.id))
+    .limit(options.limit)
+    .offset(options.offset);
+
+  return rows.map((row) => ({
+    ...row,
+    cost: Number(row.cost),
+    currentPrice: Number(row.currentPrice),
+    desiredMarginPercent: Number(row.desiredMarginPercent),
+    marketPrice: row.marketPrice ? Number(row.marketPrice) : null,
+  }));
+}
+
 export async function createInventoryItem(organizationId: string, input: z.infer<typeof inventoryInputSchema>) {
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${organizationId}, 0))`);

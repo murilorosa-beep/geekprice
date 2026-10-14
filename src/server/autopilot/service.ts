@@ -230,32 +230,49 @@ export function matchRuleForItem(
   return bestRule;
 }
 
-export async function getAutopilotQueue(
-  organizationId: string,
+export type AutopilotPolicySettings = {
+  feePercent: number;
+  additionalCostPercent: number;
+  minimumMarginPercent: number;
+  desiredMarginPercent: number;
+  marketDiscountPercent: number;
+};
+
+export type EvaluatedChunkResult = {
+  safe: AutopilotItemView[];
+  flagged: AutopilotItemView[];
+  unchanged: AutopilotItemView[];
+  potentialRevenueImpact: number;
+  marginSum: number;
+};
+
+export function evaluateAutopilotItemChunk(
+  items: Array<{
+    id: string;
+    name: string;
+    category: string;
+    sku: string;
+    set?: string | null;
+    code?: string | null;
+    finish?: string | null;
+    rarity?: string | null;
+    cost: number;
+    currentPrice: number;
+    marketPrice: number | null;
+    desiredMarginPercent: number;
+    stock: number;
+  }>,
+  rules: PricingRuleRecord[],
+  defaultPolicy: AutopilotPolicySettings,
   channel: "counter" | "ecommerce" | "marketplace" = "counter"
-): Promise<AutopilotQueueResult> {
-  const [inventory, rules, basePolicy] = await Promise.all([
-    listAllInventory(organizationId),
-    listPricingRules(organizationId),
-    getActivePricingPolicy(organizationId),
-  ]);
-
-  const defaultPolicy = basePolicy ?? {
-    feePercent: 12,
-    additionalCostPercent: 0,
-    minimumMarginPercent: 20,
-    desiredMarginPercent: 25,
-    marketDiscountPercent: 3,
-  };
-
+): EvaluatedChunkResult {
   const safe: AutopilotItemView[] = [];
   const flagged: AutopilotItemView[] = [];
   const unchanged: AutopilotItemView[] = [];
-
   let potentialRevenueImpact = 0;
   let marginSum = 0;
 
-  for (const item of inventory.items) {
+  for (const item of items) {
     const matchedRule = matchRuleForItem(rules, item, channel);
 
     const feePercent = matchedRule ? Number(matchedRule.feePercent) : defaultPolicy.feePercent;
@@ -333,6 +350,34 @@ export async function getAutopilotQueue(
       flagged.push(itemView);
     }
   }
+
+  return { safe, flagged, unchanged, potentialRevenueImpact, marginSum };
+}
+
+export async function getAutopilotQueue(
+  organizationId: string,
+  channel: "counter" | "ecommerce" | "marketplace" = "counter"
+): Promise<AutopilotQueueResult> {
+  const [inventory, rules, basePolicy] = await Promise.all([
+    listAllInventory(organizationId),
+    listPricingRules(organizationId),
+    getActivePricingPolicy(organizationId),
+  ]);
+
+  const defaultPolicy: AutopilotPolicySettings = basePolicy ?? {
+    feePercent: 12,
+    additionalCostPercent: 0,
+    minimumMarginPercent: 20,
+    desiredMarginPercent: 25,
+    marketDiscountPercent: 3,
+  };
+
+  const { safe, flagged, unchanged, potentialRevenueImpact, marginSum } = evaluateAutopilotItemChunk(
+    inventory.items,
+    rules,
+    defaultPolicy,
+    channel
+  );
 
   const totalItems = inventory.items.length;
   const averageProjectedMargin = totalItems > 0 ? Number((marginSum / totalItems).toFixed(1)) : 0;
