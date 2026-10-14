@@ -1,131 +1,177 @@
-import { eq } from "drizzle-orm";
+import { randomBytes } from "node:crypto";
+import { writeFile } from "node:fs/promises";
+import { eq, sql } from "drizzle-orm";
 import { db } from "../src/db";
-import { memberships, organizations, pricingPolicies, softwareProducts, subscriptions, users } from "../src/db/schema";
+import {
+  memberships,
+  organizations,
+  pricingPolicies,
+  softwareProducts,
+  subscriptions,
+  users,
+} from "../src/db/schema";
 import { hashPassword } from "../src/server/auth/password";
 
 async function main() {
-  const adminEmail = "admin@geekprice.com.br";
-  const testEmail = "admin@teste.com";
-  const password = "GeekPriceMaster2026!";
+  const adminEmail = (process.env.ADMIN_EMAIL || "admin@geekprice.com.br").trim().toLowerCase();
+  const rawPassword = process.env.ADMIN_PASSWORD || process.env.SEED_ADMIN_PASSWORD;
+
+  let password = rawPassword?.trim();
+  let generatedLocally = false;
+
+  if (!password) {
+    // Gerar senha forte criptográfica com alta entropia (24 caracteres base64url)
+    password = randomBytes(18).toString("base64url");
+    generatedLocally = true;
+    await writeFile(
+      ".admin-credentials.local",
+      `ADMIN_EMAIL=${adminEmail}\nADMIN_PASSWORD=${password}\nGENERATED_AT=${new Date().toISOString()}\n`,
+      {
+        encoding: "utf8",
+        mode: 0o600,
+      }
+    );
+  } else if (password.length < 12) {
+    throw new Error("A senha do administrador deve ter no mínimo 12 caracteres.");
+  }
+
   const passwordHash = await hashPassword(password);
   const now = new Date();
 
-  console.log("==> Configurando usuário Master Admin no PostgreSQL...");
+  console.log("==> Provisionando usuário Master Admin com segurança...");
 
-  // 1. Obter ou criar organização principal
-  let [org] = await db.select().from(organizations).where(eq(organizations.name, "GeekPrice Admin")).limit(1);
-  if (!org) {
-    [org] = await db.insert(organizations).values({
-      name: "GeekPrice Admin",
-      slug: `geekprice-admin-${Date.now()}`,
-      onboardingCompletedAt: now,
-    }).returning();
-    console.log("Organização 'GeekPrice Admin' criada:", org.id);
-  } else {
-    console.log("Organização 'GeekPrice Admin' encontrada:", org.id);
-  }
+  await db.transaction(async (tx) => {
+    // 1. Obter ou criar organização principal
+    let [org] = await tx.select().from(organizations).where(eq(organizations.name, "GeekPrice Admin")).limit(1);
+    if (!org) {
+      [org] = await tx
+        .insert(organizations)
+        .values({
+          name: "GeekPrice Admin",
+          slug: `geekprice-admin-${Date.now()}`,
+          onboardingCompletedAt: now,
+        })
+        .returning();
+      console.log("[OK] Organização 'GeekPrice Admin' criada.");
+    }
 
-  // 2. Garantir produto de software GeekPrice
-  let [softwareProduct] = await db.select().from(softwareProducts).where(eq(softwareProducts.code, "geekprice")).limit(1);
-  if (!softwareProduct) {
-    [softwareProduct] = await db.insert(softwareProducts).values({
-      code: "geekprice",
-      slug: "geekprice",
-      name: "GeekPrice",
-      description: "Plataforma SaaS de inteligência de preços e gestão de estoque para lojas geek e TCG.",
-      active: true,
-    }).returning();
-    console.log("Produto de software GeekPrice criado:", softwareProduct.id);
-  }
+    // 2. Garantir produto de software GeekPrice
+    let [softwareProduct] = await tx.select().from(softwareProducts).where(eq(softwareProducts.code, "geekprice")).limit(1);
+    if (!softwareProduct) {
+      [softwareProduct] = await tx
+        .insert(softwareProducts)
+        .values({
+          code: "geekprice",
+          slug: "geekprice",
+          name: "GeekPrice",
+          description: "Plataforma SaaS de inteligência de preços e gestão de estoque para lojas geek e TCG.",
+          active: true,
+        })
+        .returning();
+      console.log("[OK] Produto de software GeekPrice registrado.");
+    }
 
-  // 3. Garantir política de preços
-  const [existingPolicy] = await db.select().from(pricingPolicies).where(eq(pricingPolicies.organizationId, org.id)).limit(1);
-  if (!existingPolicy) {
-    await db.insert(pricingPolicies).values({
-      organizationId: org.id,
-      name: "Política padrão",
-      feePercent: "12.00",
-      additionalCostPercent: "0.00",
-      minimumMarginPercent: "15.00",
-      desiredMarginPercent: "25.00",
-      marketDiscountPercent: "2.00",
-    });
-    console.log("Política de preços padrão vinculada.");
-  }
+    // 3. Garantir política de preços padrão
+    const [existingPolicy] = await tx.select().from(pricingPolicies).where(eq(pricingPolicies.organizationId, org.id)).limit(1);
+    if (!existingPolicy) {
+      await tx.insert(pricingPolicies).values({
+        organizationId: org.id,
+        name: "Política padrão",
+        feePercent: "12.00",
+        additionalCostPercent: "0.00",
+        minimumMarginPercent: "15.00",
+        desiredMarginPercent: "25.00",
+        marketDiscountPercent: "2.00",
+      });
+      console.log("[OK] Política de preços padrão vinculada.");
+    }
 
-  // 4. Garantir assinatura
-  const [existingSub] = await db.select().from(subscriptions).where(eq(subscriptions.organizationId, org.id)).limit(1);
-  if (!existingSub) {
-    await db.insert(subscriptions).values({
-      organizationId: org.id,
-      softwareProductId: softwareProduct.id,
-      plan: "starter",
-      status: "active",
-      productLimit: 5000,
-      memberLimit: 10,
-    });
-    console.log("Assinatura ativa configurada.");
-  }
+    // 4. Garantir assinatura ativa
+    const [existingSub] = await tx.select().from(subscriptions).where(eq(subscriptions.organizationId, org.id)).limit(1);
+    if (!existingSub) {
+      await tx.insert(subscriptions).values({
+        organizationId: org.id,
+        softwareProductId: softwareProduct.id,
+        plan: "starter",
+        status: "active",
+        productLimit: 5000,
+        memberLimit: 10,
+      });
+      console.log("[OK] Assinatura ativa configurada.");
+    }
 
-  // 5. Configurar admin@geekprice.com.br
-  let [userMaster] = await db.select().from(users).where(eq(users.email, adminEmail)).limit(1);
-  if (userMaster) {
-    await db.update(users).set({
-      name: "Murilo Rosa (Admin Master)",
-      passwordHash,
-      active: true,
-      emailVerifiedAt: now,
-      updatedAt: now,
-    }).where(eq(users.id, userMaster.id));
-    console.log(`Usuário ${adminEmail} atualizado com nova senha.`);
-  } else {
-    [userMaster] = await db.insert(users).values({
-      name: "Murilo Rosa (Admin Master)",
-      email: adminEmail,
-      passwordHash,
-      active: true,
-      emailVerifiedAt: now,
-    }).returning();
-    console.log(`Usuário ${adminEmail} criado.`);
-  }
+    // 5. Configurar usuário admin master único
+    let [userMaster] = await tx.select().from(users).where(eq(users.email, adminEmail)).limit(1);
+    if (userMaster) {
+      await tx
+        .update(users)
+        .set({
+          name: "Murilo Rosa (Admin Master)",
+          passwordHash,
+          active: true,
+          emailVerifiedAt: now,
+          sessionVersion: sql`coalesce(${users.sessionVersion}, 0) + 1`,
+          updatedAt: now,
+        })
+        .where(eq(users.id, userMaster.id));
+      console.log(`[OK] Usuário ${adminEmail} atualizado e sessões anteriores invalidadas.`);
+    } else {
+      [userMaster] = await tx
+        .insert(users)
+        .values({
+          name: "Murilo Rosa (Admin Master)",
+          email: adminEmail,
+          passwordHash,
+          active: true,
+          emailVerifiedAt: now,
+        })
+        .returning();
+      console.log(`[OK] Usuário ${adminEmail} provisionado.`);
+    }
 
-  // Garantir membership como owner para admin@geekprice.com.br
-  const [memMaster] = await db.select().from(memberships).where(eq(memberships.userId, userMaster.id)).limit(1);
-  if (!memMaster) {
-    await db.insert(memberships).values({
-      organizationId: org.id,
-      userId: userMaster.id,
-      role: "owner",
-    });
-  } else if (memMaster.role !== "owner") {
-    await db.update(memberships).set({ role: "owner" }).where(eq(memberships.userId, userMaster.id));
-  }
+    // 6. Garantir permissão owner
+    const [membership] = await tx.select().from(memberships).where(eq(memberships.userId, userMaster.id)).limit(1);
+    if (!membership) {
+      await tx.insert(memberships).values({
+        organizationId: org.id,
+        userId: userMaster.id,
+        role: "owner",
+      });
+    } else if (membership.role !== "owner") {
+      await tx.update(memberships).set({ role: "owner" }).where(eq(memberships.userId, userMaster.id));
+    }
 
-  // 6. Atualizar também admin@teste.com com a mesma senha (caso prefira usar esse e-mail)
-  const [userTest] = await db.select().from(users).where(eq(users.email, testEmail)).limit(1);
-  if (userTest) {
-    await db.update(users).set({
-      passwordHash,
-      active: true,
-      emailVerifiedAt: now,
-      updatedAt: now,
-    }).where(eq(users.id, userTest.id));
-    console.log(`Usuário alternativo ${testEmail} também sincronizado com a mesma senha.`);
-  }
+    // 7. Desativar qualquer conta de teste residual (garantir conta única de admin conforme solicitado)
+    const [testUser] = await tx.select().from(users).where(eq(users.email, "admin@teste.com")).limit(1);
+    if (testUser) {
+      await tx
+        .update(users)
+        .set({
+          active: false,
+          sessionVersion: sql`coalesce(${users.sessionVersion}, 0) + 1`,
+          updatedAt: now,
+        })
+        .where(eq(users.id, testUser.id));
+      console.log("[OK] Conta de teste secundária desativada (único admin mantido: " + adminEmail + ").");
+    }
+  });
 
   console.log("\n=======================================================");
-  console.log("USUÁRIO MASTER CADASTRADO COM SUCESSO:");
-  console.log("E-mail principal:   admin@geekprice.com.br");
-  console.log("E-mail alternativo: admin@teste.com");
-  console.log("Senha de acesso:    GeekPriceMaster2026!");
-  console.log("Permissão (Role):   owner (Acesso Total)");
-  console.log("Organização:       GeekPrice Admin");
+  console.log("PROVISIONAMENTO SEGURO CONCLUÍDO COM SUCESSO");
+  console.log(`E-mail do administrador: ${adminEmail}`);
+  console.log("Permissão (Role):       owner (Acesso Total)");
+  console.log("Organização:            GeekPrice Admin");
+  if (generatedLocally) {
+    console.log("Credenciais salvas em:  .admin-credentials.local (protegido e ignorado pelo Git)");
+  } else {
+    console.log("Origem da senha:        Lida de variável de ambiente (não impressa em log)");
+  }
   console.log("=======================================================\n");
 }
 
 main()
   .then(() => process.exit(0))
   .catch((err) => {
-    console.error("Falha ao criar usuário master:", err);
+    console.error("Falha ao provisionar usuário master:", err instanceof Error ? err.message : err);
     process.exit(1);
   });

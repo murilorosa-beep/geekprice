@@ -82,8 +82,32 @@ Foi realizada uma auditoria comparativa entre a base comercial (`postgres`) e a 
    ```
 2. **Inspeção do Histórico (`git log`):**
    - `git ls-files | grep '\.env'` confirmou que **apenas `.env.example`** está sob versionamento.
-   - Nenhum arquivo de certificado privado (`.pem`, `.key`) ou segredo de produção consta nos commits locais ou remotos.
+   - Nenhum arquivo de certificado privado (`.pem`, `.key`) consta nos commits.
    - O arquivo `certs/supabase-prod-ca-2021.crt` versionado no projeto contém exclusivamente o certificado raiz **público** de autoridade certificadora (CA), sem chaves privadas.
+
+### 4.1. Auditoria e Remediação de Credenciais Administrativas
+Durante a auditoria de segurança pré-deploy, identificou-se que o arquivo `scripts/create-master-admin.ts` (introduzido no commit `e19cda4` em 14/10/2026) continha uma senha estática compartilhada entre duas contas (`admin@geekprice.com.br` e `admin@teste.com`), além de imprimir a senha em texto claro no terminal.
+
+**Ações corretivas executadas imediatamente:**
+1. **Eliminação de Senha Fixa:** O script `scripts/create-master-admin.ts` foi completamente refatorado para ler a senha de variáveis de ambiente privadas (`ADMIN_PASSWORD` ou `SEED_ADMIN_PASSWORD`) ou gerar uma senha forte com alta entropia criptográfica (`randomBytes(18)`), gravando-a apenas no arquivo gitignored `.admin-credentials.local`.
+2. **Remoção de Logs de Segredos:** Todas as saídas de terminal com senhas, tokens ou hashes foram removidas.
+3. **Conta Única de Administrador:** Atendendo à solicitação do lojista de manter apenas uma conta de administração (`admin@geekprice.com.br`), a conta secundária de testes `admin@teste.com` foi desativada e desvinculada de permissões de owner.
+4. **Script de Rotação Imediata (`scripts/rotate-admin-password.ts`):** Criado o comando `npm run admin:rotate` que permite redefinir a senha do administrador a qualquer momento sem migrações e sem log de credenciais.
+5. **Invalidação de Sessões Ativas:** O mecanismo de segurança incrementa o campo `sessionVersion` do usuário na tabela `users`, fazendo com que qualquer token JWT emitido com a versão anterior seja rejeitado instantaneamente em `src/server/auth/context.ts`.
+6. **Não Aplicação de Migrations:** Os scripts de provisionamento realizam estritamente operações DML (`select`, `insert`, `update`), sem invocar `drizzle-kit migrate` ou alterar o DDL do banco comercial.
+
+### 4.2. Orientação para Limpeza do Histórico Git
+O commit `e19cda4` já havia sido enviado anteriormente ao repositório remoto (`origin/main`). Para eliminar a menção histórica do script antigo no GitHub, recomenda-se executar (mediante autorização):
+```bash
+# Limpeza segura de arquivo histórico com git-filter-repo (exige git-filter-repo instalado)
+git filter-repo --path scripts/create-master-admin.ts --invert-paths --force
+
+# Ou sobrescrever o commit histórico com rebase interativo:
+# git rebase -i e19cda4^
+# (Reescrever o commit sem a senha fixa e forçar atualização controlada)
+```
+> [!CAUTION]
+> A reescrita de histórico exige `git push --force`. Como diretriz de segurança, este comando **não é executado automaticamente** e deve ser conduzido apenas após alinhamento de todos os colaboradores do repositório.
 
 ---
 
@@ -203,15 +227,24 @@ BILLING_TRIAL_PRODUCT_LIMIT=1000
 BILLING_TRIAL_MEMBER_LIMIT=5
 ```
 
-> [!NOTE]
-> **Sobre o TLS/SSL do Supabase no Railway:** O driver `postgres-js` utilizado pelo GeekPrice lê o parâmetro `?sslmode=require` da `DATABASE_URL`. Como os certificados do pooler do Supabase são assinados por autoridades reconhecidas pelo repositório de CAs padrão do Node.js no Linux (Railway), **não é necessário subir arquivos `.crt` ou definir `DATABASE_SSL_CA_PATH`**.
+> [!IMPORTANT]
+> **Validação Estrita de TLS/SSL no Supabase:**
+> O Supabase utiliza sua própria Autoridade Certificadora raiz (`certs/supabase-prod-ca-2021.crt`). Para garantir segurança total contra ataques man-in-the-middle sem desativar a verificação de certificados, o GeekPrice em `src/db/connection-settings.ts` carrega automaticamente o certificado empacotado no projeto com `rejectUnauthorized: true`. A validação do certificado e do hostname do pooler está 100% ativa tanto localmente quanto no Railway.
 
-### 7.5. Verificação Pós-Deploy (Smoke Test)
+### 7.5. Start Command e Porta Dinâmica no Railway
+- **Comando Recomendado:** `npm run start`
+- O Next.js detecta nativamente a variável de ambiente `PORT` fornecida dinamicamente pelo Railway e realiza o bind automático em `0.0.0.0`.
+- Caso prefira declarar explicitamente no painel do Railway (**Settings** > **Deploy** > **Custom Start Command**):
+  ```bash
+  npm run start -- -p ${PORT:-3000} -H 0.0.0.0
+  ```
+
+### 7.6. Verificação Pós-Deploy (Smoke Test)
 Após a conclusão do build e deploy pelo Railway:
 1. Acesse o domínio público gerado pelo Railway: `https://[SEU_DOMINIO].up.railway.app/login`.
-2. Efetue login com as credenciais administrativas existentes:
+2. Efetue login com as credenciais administrativas configuradas:
    - **E-mail:** `admin@geekprice.com.br`
-   - **Senha:** *(Senha definida na criação do master admin)*
+   - **Senha:** *(Definida de forma privada via `npm run admin:rotate`)*
 3. Acesse a aba **Estoque** (`/products`) e confirme o carregamento da lista.
 4. Realize o cadastro de um produto de teste para validar a gravação no PostgreSQL.
 5. Acesse **Recomendações** (`/recommendations`) e confirme o cálculo de margens.

@@ -21,7 +21,9 @@
     "db:repair-admin": "tsx --env-file=.env scripts/repair-local-admin-password.ts",
     "worker:autopilot": "tsx --env-file=.env scripts/run-autopilot-worker.ts",
     "worker:autopilot:once": "tsx --env-file=.env scripts/run-autopilot-worker.ts --once",
-    "db:check": "tsx scripts/verify-migration-snapshots.ts"
+    "db:check": "tsx scripts/verify-migration-snapshots.ts",
+    "admin:create": "tsx --env-file=.env scripts/create-master-admin.ts",
+    "admin:rotate": "tsx --env-file=.env scripts/rotate-admin-password.ts"
   },
   "dependencies": {
     "@next/env": "^16.4.0",

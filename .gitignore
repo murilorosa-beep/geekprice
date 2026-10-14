@@ -13,3 +13,5 @@ backups/
 *.key
 *.p12
 *.pfx
+*.local
+.admin-*.local
