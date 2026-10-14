@@ -1,6 +1,16 @@
 # GeekPrice — situação do projeto
 
-## Estado atual — Fase 9.2 (14/10/2026)
+## Estado atual — Fase 9.3 (14/10/2026) — Marco 1 Concluído
+
+O estado técnico vigente e comprovado está documentado em [PHASE9_3_FUNCTIONAL_MVP_REPORT.md](PHASE9_3_FUNCTIONAL_MVP_REPORT.md). A Fase 9.3 consolidou o GeekPrice como um programa SaaS utilizável e funcional (Marco 1):
+- **Validação Completa no Navegador:** Jornada real de 20 passos executada com Playwright Chromium em ambiente de produção Next.js conectado ao PostgreSQL 17.11 isolado (`geekprice_phase81_test_1791978720676`). Todos os 20 passos aprovados com 0 erros de página.
+- **Ciclo Funcional Completo Comprovado:** Login seguro, dashboard dinâmico, cadastro manual, cadastro inteligente Pokémon (TCGdex) e Magic (Scryfall), edição de custos/preços/quantidades, importação CSV de estoque com prévia assinada e commit atômico, exportação CSV, configuração de taxas e margens, importação de cotações BRL de mercado privadas, cálculo de piso rentável com proteção matemática contra prejuízo, aprovação manual de recomendação no Autopilot com geração de lote e auditoria, e rollback supervisionado com restauração contábil exata do preço original.
+- **Desacoplamento e Segurança de Dependências:** O sistema base opera com independência de Mercado Pago, assinaturas pagas, WooCommerce, Mercado Livre, worker automático ou sincronização externa. Nenhuma conexão pendente é apresentada como ativa; o checkout permanece desabilitado preventivamente com mensagem clara na tela.
+- **Suíte de Testes e Qualidade:** 83 testes unitários aprovados (24 arquivos), 31 testes de integração PostgreSQL real aprovados (22 Fase 8.1 + 9 Fase 9), 7 fluxos HTTP aprovados, 20/20 passos de navegador aprovados, typecheck TypeScript sem erros, ESLint sem erros e build Next.js com 69 rotas compiladas com sucesso.
+- **Situação da Migration 0013 e Banco Comercial:** O banco comercial `postgres` no Supabase permanece estritamente preservado na versão `0012` (migration `0013` `recorded: false`). Todas as gravações e testes foram realizados exclusivamente no banco isolado de testes.
+- **Conclusão:** Marco 1 concluído com sucesso. Sistema apto para pilotos comerciais assistidos (Marco 2).
+
+## Estado anterior — Fase 9.2 (14/10/2026)
 
 O estado técnico vigente e comprovado está documentado em [PHASE9_2_DISTRIBUTED_INTEGRITY_REPORT.md](PHASE9_2_DISTRIBUTED_INTEGRITY_REPORT.md). A Fase 9.2 consolidou a integridade distribuída e transacional do sistema:
 - **Migration 0013 (`0013_distributed_integrity.sql`):** Criou `autopilot_worker_state` (singleton com lease, heartbeat e fencing version), `commerce_previews` (snapshot JSONB durável, payload hash canônico e status restrito) e `price_change_batches.idempotency_key` (índice único composto por organização). Aplicada **exclusivamente** no banco isolado de testes (`geekprice_phase81_test_1791978720676`). Banco comercial `postgres` intocado na versão `0012`.
