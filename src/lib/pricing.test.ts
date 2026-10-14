@@ -99,5 +99,17 @@ describe("calculateRecommendation", () => {
       expect(result.safetyGate).toBe("missing_market_reference");
       expect(result.safetyFlag).toContain("Sem cotação externa de mercado");
     });
+
+    it("não considera seguro um produto sem custo cadastrado", () => {
+      const result = calculateRecommendation({ cost: 0, feesPercent: 10, desiredMarginPercent: 20, currentPrice: 10, marketPrice: 12 });
+      expect(result.safetyStatus).toBe("suspicious_flagged");
+      expect(result.safetyGate).toBe("missing_cost");
+    });
+
+    it("não considera seguro um produto com preço atual zerado", () => {
+      const result = calculateRecommendation({ cost: 5, feesPercent: 10, desiredMarginPercent: 20, currentPrice: 0, marketPrice: 12 });
+      expect(result.safetyStatus).toBe("suspicious_flagged");
+      expect(result.safetyGate).toBe("missing_current_price");
+    });
   });
 });

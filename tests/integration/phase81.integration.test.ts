@@ -179,6 +179,18 @@ describe("PostgreSQL Supabase isolated integration", () => {
     await expect(rollbackPriceBatch(orgA, userA, approval.batch!.id)).rejects.toBeInstanceOf(AutopilotConflictError);
   });
 
+  it("rejects a mixed valid and invalid price selection without partial updates", async () => {
+    const before = (await listAllInventory(orgA)).items.find((item) => item.id === itemA)!.currentPrice;
+    const result = await applyPriceBatch(orgA, userA, {
+      channel: "counter",
+      itemIds: [itemA, "00000000-0000-4000-8000-000000000000"],
+      applyAllSafe: false,
+    });
+    expect(result.success).toBe(false);
+    expect(result.message).toContain("nenhum preço foi alterado");
+    expect((await listAllInventory(orgA)).items.find((item) => item.id === itemA)!.currentPrice).toBe(before);
+  });
+
   it("rate limits distributed account attempts and recovers after expiry", async () => {
     const email = `synthetic-lock-${run}@phase81.invalid`;
     for (let i = 0; i < 10; i++) {

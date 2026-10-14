@@ -1,4 +1,4 @@
-import { eq, or } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "../src/db";
 import { memberships, organizations, pricingPolicies, softwareProducts, subscriptions, users } from "../src/db/schema";
 import { hashPassword } from "../src/server/auth/password";
@@ -30,6 +30,7 @@ async function main() {
   if (!softwareProduct) {
     [softwareProduct] = await db.insert(softwareProducts).values({
       code: "geekprice",
+      slug: "geekprice",
       name: "GeekPrice",
       description: "Plataforma SaaS de inteligência de preços e gestão de estoque para lojas geek e TCG.",
       active: true,
@@ -101,7 +102,7 @@ async function main() {
   }
 
   // 6. Atualizar também admin@teste.com com a mesma senha (caso prefira usar esse e-mail)
-  let [userTest] = await db.select().from(users).where(eq(users.email, testEmail)).limit(1);
+  const [userTest] = await db.select().from(users).where(eq(users.email, testEmail)).limit(1);
   if (userTest) {
     await db.update(users).set({
       passwordHash,

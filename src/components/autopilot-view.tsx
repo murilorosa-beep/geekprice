@@ -1,10 +1,10 @@
+/* eslint-disable @next/next/no-img-element -- Imagens dos catálogos externos associadas aos produtos. */
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  ArrowDownRight,
-  ArrowUpRight,
   CheckCircle2,
   History,
   Layers,
@@ -24,12 +24,23 @@ import type {
 } from "@/server/autopilot/service";
 
 const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+const canApply = (item: AutopilotItemView) => item.cost > 0 && item.currentPrice > 0 && item.suggestedPrice > 0 && item.safetyGate !== "margin_below_minimum" && Math.abs(item.priceDifference) >= 0.01;
+const statusLabel = (item: AutopilotItemView) => {
+  if (item.safetyGate === "missing_cost") return "Cadastre o custo";
+  if (item.safetyGate === "missing_current_price") return "Cadastre o preço";
+  if (item.safetyGate === "missing_market_reference") return "Sem cotação BRL";
+  if (item.safetyGate === "spike_threshold_exceeded") return "Variação alta";
+  if (item.safetyGate === "margin_below_minimum") return "Margem abaixo do mínimo";
+  return item.safetyStatus === "unchanged" ? "Preço já alinhado" : "Pronto para revisão";
+};
 
 export function AutopilotView({
+  canManagePrices,
   initialQueue,
   initialRules,
   initialBatches,
 }: {
+  canManagePrices: boolean;
   initialQueue: AutopilotQueueResult;
   initialRules: PricingRuleRecord[];
   initialBatches: Array<{
@@ -65,6 +76,8 @@ export function AutopilotView({
   // Estados de carregamento e feedback
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [actionError, setActionError] = useState("");
+  const [reviewItem, setReviewItem] = useState<AutopilotItemView | null>(null);
 
   function showToast(msg: string) {
     setToast(msg);
@@ -109,11 +122,18 @@ export function AutopilotView({
 
   // Aplicação em lote (Seguras ou Selecionadas)
   async function handleApplyBatch(applyAllSafe: boolean) {
+    if (!canManagePrices) { setActionError("Seu acesso é de consulta. Peça a um administrador para aprovar mudanças de preço."); return; }
+    const selected = queue.safe.filter((item) => canApply(item) && (applyAllSafe || selectedIds.has(item.id)));
+    const count = selected.length;
+    if (!count) { setActionError("Selecione ao menos um produto pronto para atualização."); return; }
+    const preview = selected.slice(0, 8).map((item) => `${item.name}: ${money.format(item.currentPrice)} → ${money.format(item.suggestedPrice)}`).join("\n");
+    if (!window.confirm(`Aplicar ${count} alteração(ões) no Balcão Físico?\n\n${preview}${count > 8 ? `\n...e mais ${count - 8} produto(s)` : ""}\n\nVocê poderá conferir o lote no histórico e desfazer se o preço não tiver sido alterado depois.`)) return;
+    setActionError("");
     setLoading(true);
     try {
       const payload = applyAllSafe
         ? { channel, applyAllSafe: true, notes: `Autopilot: aprovação de todas as alterações seguras (${queue.safe.length} itens)` }
-        : { channel, itemIds: Array.from(selectedIds), notes: `Aprovação manual de ${selectedIds.size} itens selecionados` };
+        : { channel, itemIds: selected.map((item) => item.id), notes: `Aprovação manual de ${selected.length} itens selecionados` };
 
       const res = await fetch("/api/autopilot/apply", {
         method: "POST",
@@ -122,6 +142,7 @@ export function AutopilotView({
       });
       const data = await res.json();
       if (!res.ok) {
+        setActionError(data.error ?? "Não foi possível aplicar os preços.");
         showToast(data.error ?? "Erro ao aplicar lote.");
         return;
       }
@@ -137,6 +158,11 @@ export function AutopilotView({
 
   // Aplicação individual
   async function handleApplySingle(itemId: string) {
+    if (!canManagePrices) { setActionError("Seu acesso é de consulta. Peça a um administrador para aprovar mudanças de preço."); return; }
+    const item = [...queue.safe, ...queue.flagged].find((value) => value.id === itemId);
+    if (!item || !canApply(item)) { setActionError("Este item ainda não está pronto: confira custo, preço atual e motivo da trava."); return; }
+    if (item.safetyStatus === "suspicious_flagged" && !window.confirm(`Esta sugestão tem uma trava: ${item.safetyReason}\n\nAplicar mesmo assim no balcão físico?`)) return;
+    setActionError("");
     setLoading(true);
     try {
       const res = await fetch("/api/autopilot/apply", {
@@ -146,13 +172,16 @@ export function AutopilotView({
       });
       const data = await res.json();
       if (!res.ok) {
+        setActionError(data.error ?? "Não foi possível aplicar o preço.");
         showToast(data.error ?? "Erro ao aplicar.");
         return;
       }
+      setReviewItem(null);
       showToast("Preço atualizado!");
       await refreshData();
       router.refresh();
     } catch {
+      setActionError("Falha de comunicação com o servidor. Tente novamente.");
       showToast("Falha ao aplicar alteração.");
     } finally {
       setLoading(false);
@@ -186,6 +215,8 @@ export function AutopilotView({
 
   // Executar automação periódica do Autopilot
   async function handleRunAutomation() {
+    if (!canManagePrices) { setActionError("Somente administradores podem executar regras automáticas."); return; }
+    if (!window.confirm("Executar agora as regras automáticas habilitadas? Produtos qualificados podem ter o preço do balcão alterado sem confirmação individual.")) return;
     setLoading(true);
     try {
       const res = await fetch("/api/autopilot/run", { method: "POST" });
@@ -224,17 +255,20 @@ export function AutopilotView({
 
   // Manipulação de seleção
   const isAllSelected =
-    displayedItems.length > 0 && displayedItems.every((item) => selectedIds.has(item.id));
+    displayedItems.some((item) => item.safetyStatus === "safe_auto" && canApply(item)) && displayedItems.filter((item) => item.safetyStatus === "safe_auto" && canApply(item)).every((item) => selectedIds.has(item.id));
 
   function toggleSelectAll() {
+    if (!canManagePrices) return;
     if (isAllSelected) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(displayedItems.map((item) => item.id)));
+      setSelectedIds(new Set(displayedItems.filter((item) => item.safetyStatus === "safe_auto" && canApply(item)).map((item) => item.id)));
     }
   }
 
   function toggleSelectItem(id: string) {
+    if (!canManagePrices) return;
+    if (!displayedItems.some((item) => item.id === id && item.safetyStatus === "safe_auto" && canApply(item))) return;
     const updated = new Set(selectedIds);
     if (updated.has(id)) updated.delete(id);
     else updated.add(id);
@@ -249,10 +283,10 @@ export function AutopilotView({
       {/* Cabeçalho */}
       <div className="page-title">
         <div>
-          <p className="eyebrow">COPILOTO OPERACIONAL DE PREÇOS</p>
-          <h1>Autopilot de Preços e Margem</h1>
+          <p className="eyebrow">VENDA COM MAIS CLAREZA</p>
+          <h1>Revisão de preços</h1>
           <p>
-            Automação segura com proteção de margem em BRL, travas contra saltos anômalos e arredondamento comercial.
+            Compare seu preço atual com a sugestão, entenda os alertas e decida o que aplicar no balcão.
           </p>
         </div>
 
@@ -282,6 +316,14 @@ export function AutopilotView({
         </div>
       </div>
 
+      <section className="seller-steps" aria-label="Como revisar preços">
+        <div><span>01</span><strong>Cadastre o produto</strong><p>Confira custo e preço de venda em <Link href="/products">Produtos</Link>.</p></div>
+        <div><span>02</span><strong>Consulte o mercado</strong><p>Vincule uma referência BRL em <Link href="/market">Mercado</Link> quando disponível.</p></div>
+        <div><span>03</span><strong>Revise e confirme</strong><p>Veja o motivo da sugestão antes de mudar o preço no balcão.</p></div>
+      </section>
+      {actionError && <div className="autopilot-help" role="alert">{actionError}<button type="button" className="row-action" onClick={() => setActionError("")}>Fechar</button></div>}
+      {!canManagePrices && <div className="autopilot-help">Você pode consultar sugestões e explicar os valores ao cliente. Apenas administradores da loja podem aplicar preços, editar regras ou desfazer alterações.</div>}
+
       {/* Métricas do Autopilot */}
       <div className="metrics">
         <article className="metric">
@@ -289,9 +331,9 @@ export function AutopilotView({
             <CheckCircle2 size={19} />
           </div>
           <div>
-            <p>Alterações Seguras</p>
+            <p>Prontos para revisar</p>
             <strong>{queue.stats.safeCount}</strong>
-            <span className="positive">Prontas para Autopilot</span>
+            <span className="positive">Com dados para decisão</span>
           </div>
         </article>
 
@@ -300,9 +342,9 @@ export function AutopilotView({
             <SlidersHorizontal size={19} />
           </div>
           <div>
-            <p>Travas Ativadas (Revisão)</p>
+            <p>Precisam de atenção</p>
             <strong>{queue.stats.flaggedCount}</strong>
-            <span>Oscilação &gt;15% ou margem</span>
+            <span>Abra o item para ver o motivo</span>
           </div>
         </article>
 
@@ -311,9 +353,9 @@ export function AutopilotView({
             <TrendingUp size={19} />
           </div>
           <div>
-            <p>Margem Média Projetada</p>
-            <strong>{queue.stats.averageProjectedMargin}%</strong>
-            <span>Piso rentável garantido</span>
+            <p>Margem média estimada</p>
+            <strong>{queue.stats.safeCount > 0 ? `${queue.stats.averageProjectedMargin}%` : "—"}</strong>
+            <span>{queue.stats.safeCount > 0 ? "Estimativa das sugestões" : "Aguardando dados completos"}</span>
           </div>
         </article>
 
@@ -322,9 +364,9 @@ export function AutopilotView({
             <Sparkles size={19} />
           </div>
           <div>
-            <p>Impacto Financeiro Líquido</p>
-            <strong>{money.format(queue.stats.potentialRevenueImpact)}</strong>
-            <span>Estoque total potencial</span>
+            <p>Impacto potencial no estoque</p>
+            <strong>{queue.stats.safeCount > 0 ? money.format(queue.stats.potentialRevenueImpact) : "—"}</strong>
+            <span>{queue.stats.safeCount > 0 ? "Estimativa, não receita realizada" : "Aguardando sugestões seguras"}</span>
           </div>
         </article>
       </div>
@@ -336,7 +378,7 @@ export function AutopilotView({
           className={`autopilot-tab ${activeTab === "queue" ? "active" : ""}`}
           onClick={() => setActiveTab("queue")}
         >
-          <Zap size={16} /> Fila de Aprovação
+          <Zap size={16} /> Sugestões de preço
           <span className="tab-count">{queue.safe.length + queue.flagged.length}</span>
         </button>
 
@@ -345,7 +387,7 @@ export function AutopilotView({
           className={`autopilot-tab ${activeTab === "rules" ? "active" : ""}`}
           onClick={() => setActiveTab("rules")}
         >
-          <SlidersHorizontal size={16} /> Regras de Precificação
+          <SlidersHorizontal size={16} /> Regras de preços
           <span className="tab-count">{rules.length}</span>
         </button>
 
@@ -354,7 +396,7 @@ export function AutopilotView({
           className={`autopilot-tab ${activeTab === "batches" ? "active" : ""}`}
           onClick={() => setActiveTab("batches")}
         >
-          <History size={16} /> Histórico de Lotes & Rollback
+          <History size={16} /> Histórico e desfazer
           <span className="tab-count">{batches.length}</span>
         </button>
       </div>
@@ -375,12 +417,12 @@ export function AutopilotView({
           )}
 
           {/* Banner de Ação Rápida quando há itens seguros */}
-          {channel === "counter" && queue.safe.length > 0 && (
+          {channel === "counter" && canManagePrices && queue.safe.length > 0 && (
             <div className="autopilot-banner">
               <div className="banner-info">
-                <h3>⚡ {queue.safe.length} alterações seguras identificadas</h3>
+                <h3>{queue.safe.length} {queue.safe.length === 1 ? "sugestão pronta" : "sugestões prontas"} para revisão</h3>
                 <p>
-                  Todas respeitam a margem mínima e não ultrapassam a trava de variação máxima de 15%.
+                  Confira os valores antes de confirmar. A mudança afeta o preço do balcão físico, não publica preço em marketplaces.
                 </p>
               </div>
               <div className="banner-actions">
@@ -390,41 +432,44 @@ export function AutopilotView({
                   disabled={loading}
                   onClick={() => handleApplyBatch(true)}
                 >
-                  <Zap size={16} /> Aprovar todas ({queue.safe.length}) em 1 Clique
+                  <CheckCircle2 size={16} /> Revisar e confirmar {queue.safe.length}
                 </button>
               </div>
             </div>
           )}
 
           {/* Filtros e Busca */}
+          {queue.stats.totalItems > 0 && queue.stats.safeCount === 0 && (
+            <div className="autopilot-help">Nenhum item está pronto para aplicação automática. Abra cada produto para ver o motivo. Custo ou preço zerado precisa ser corrigido em <Link href="/products">Produtos</Link>; referências ausentes podem ser vinculadas em <Link href="/market">Mercado</Link>.</div>
+          )}
           <div className="filters" style={{ justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
               <input
                 type="text"
-                placeholder="Buscar por carta, coleção ou SKU..."
+                placeholder="Buscar carta, coleção ou SKU"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setSearch(e.target.value); setSelectedIds(new Set()); }}
                 style={{ width: "280px" }}
               />
 
               <select
                 value={queueFilter}
-                onChange={(e) => setQueueFilter(e.target.value as typeof queueFilter)}
+                onChange={(e) => { setQueueFilter(e.target.value as typeof queueFilter); setSelectedIds(new Set()); }}
               >
                 <option value="all">Todos os produtos ({queue.stats.totalItems})</option>
-                <option value="safe">Somente Seguros ({queue.stats.safeCount})</option>
-                <option value="flagged">Retidos / Suspeitos ({queue.stats.flaggedCount})</option>
-                <option value="unchanged">Sem alteração ({queue.stats.unchangedCount})</option>
+                <option value="safe">Prontos para revisar ({queue.stats.safeCount})</option>
+                <option value="flagged">Precisam de atenção ({queue.stats.flaggedCount})</option>
+                <option value="unchanged">Preço já alinhado ({queue.stats.unchangedCount})</option>
               </select>
 
-              {channel === "counter" && selectedIds.size > 0 && (
+              {channel === "counter" && canManagePrices && selectedIds.size > 0 && (
                 <button
                   type="button"
                   className="primary small"
                   disabled={loading}
                   onClick={() => handleApplyBatch(false)}
                 >
-                  <CheckCircle2 size={15} /> Aprovar {selectedIds.size} selecionados
+                  <CheckCircle2 size={15} /> Confirmar {selectedIds.size} selecionados
                 </button>
               )}
             </div>
@@ -433,26 +478,26 @@ export function AutopilotView({
               <button
                 type="button"
                 className="secondary"
-                disabled={loading || channel !== "counter"}
+                disabled={loading || channel !== "counter" || !canManagePrices}
                 onClick={handleRunAutomation}
-                title="Executa as regras com Autopilot Seguro ativado"
+                title="Executa somente regras automáticas previamente habilitadas"
               >
-                <Sparkles size={15} /> Autopilot Automático
+                <Sparkles size={15} /> Executar regras automáticas
               </button>
               <button
                 type="button"
                 className="secondary"
                 disabled={loading}
                 onClick={refreshData}
-                title="Recalcular referências de mercado e regras"
+                title="Atualizar sugestões e regras; não altera preços"
               >
-                <RefreshCw size={15} /> Recalcular
+                <RefreshCw size={15} /> Atualizar sugestões
               </button>
             </div>
           </div>
 
           {/* Tabela de Produtos */}
-          <section className="panel products-panel">
+          <section className="panel products-panel seller-queue">
             <div className="table-wrap">
               <table>
                 <thead>
@@ -462,18 +507,14 @@ export function AutopilotView({
                         type="checkbox"
                         className="table-checkbox"
                         checked={isAllSelected}
-                        disabled={channel !== "counter"}
+                        disabled={!canManagePrices || channel !== "counter" || !displayedItems.some((item) => item.safetyStatus === "safe_auto" && canApply(item))}
                         onChange={toggleSelectAll}
                       />
                     </th>
-                    <th>PRODUTO / DETALHES</th>
+                    <th>CARTA / PRODUTO</th>
                     <th>PREÇO ATUAL</th>
-                    <th>PISO MÍNIMO</th>
-                    <th>MERCADO</th>
-                    <th>SUGERIDO (AUTOPILOT)</th>
-                    <th>VARIAÇÃO</th>
-                    <th>MARGEM</th>
-                    <th>STATUS DE SEGURANÇA</th>
+                    <th>SUGESTÃO</th>
+                    <th>POR QUÊ?</th>
                     <th style={{ textAlign: "right" }}>AÇÃO</th>
                   </tr>
                 </thead>
@@ -489,15 +530,13 @@ export function AutopilotView({
                             type="checkbox"
                             className="table-checkbox"
                             checked={isSelected}
-                            disabled={channel !== "counter"}
+                            disabled={!canManagePrices || channel !== "counter" || !isSafe || !canApply(item)}
                             onChange={() => toggleSelectItem(item.id)}
                           />
                         </td>
                         <td>
                           <div className="product-cell">
-                            <div className="product-thumb thumb-3">
-                              {item.name.slice(0, 2).toUpperCase()}
-                            </div>
+                            {item.imageUrl && /^https:\/\//i.test(item.imageUrl) ? <img className="product-art" src={item.imageUrl} alt={`Carta ${item.name}`} loading="lazy"/> : <div className="product-art-placeholder">{item.name.slice(0, 2).toUpperCase()}</div>}
                             <div>
                               <strong>{item.name}</strong>
                               <span>
@@ -518,77 +557,19 @@ export function AutopilotView({
                         </td>
                         <td>{money.format(item.currentPrice)}</td>
                         <td>
-                          <span style={{ color: "#777c8e", fontSize: "12px" }}>
-                            {money.format(item.minimumPrice)}
-                          </span>
+                          <strong className="seller-suggested">{money.format(item.suggestedPrice)}</strong>
+                          <span className="seller-delta">{item.currentPrice <= 0 ? "Preço atual não cadastrado" : `${item.percentageChange >= 0 ? "+" : ""}${item.percentageChange.toFixed(1)}% em relação ao atual`}</span>
                         </td>
                         <td>
-                          {item.marketPrice == null ? (
-                            <span style={{ color: "#a5a8b7" }}>Sem cotação</span>
-                          ) : (
-                            money.format(item.marketPrice)
-                          )}
-                        </td>
-                        <td>
-                          <strong style={{ color: "var(--violet)", fontSize: "14px" }}>
-                            {money.format(item.suggestedPrice)}
-                          </strong>
-                          {item.roundingMode !== "none" && (
-                            <span style={{ display: "block", fontSize: "9px", color: "#8d87a5" }}>
-                              arred. {item.roundingMode === "ends_90" ? ".90" : item.roundingMode}
-                            </span>
-                          )}
-                        </td>
-                        <td>
-                          <span
-                            className={`diff ${
-                              item.priceDifference > 0 ? "up" : item.priceDifference < 0 ? "down" : ""
-                            }`}
-                            style={{ display: "flex", alignItems: "center", gap: "2px" }}
-                          >
-                            {item.priceDifference > 0 ? (
-                              <ArrowUpRight size={14} />
-                            ) : item.priceDifference < 0 ? (
-                              <ArrowDownRight size={14} />
-                            ) : null}
-                            {item.percentageChange >= 0 ? "+" : ""}
-                            {item.percentageChange.toFixed(1)}%
-                          </span>
-                        </td>
-                        <td>
-                          <strong>{item.projectedMargin.toFixed(1)}%</strong>
-                        </td>
-                        <td>
-                          <span
-                            className={`safety-pill ${item.safetyStatus}`}
-                            title={item.safetyFlag ?? item.safetyReason}
-                          >
-                            {item.safetyStatus === "safe_auto" && "✓ Seguro"}
-                            {item.safetyStatus === "suspicious_flagged" && (
-                              <>
-                                ⚠{" "}
-                                {item.safetyGate === "spike_threshold_exceeded"
-                                  ? "Salto > 15%"
-                                  : item.safetyGate === "margin_below_minimum"
-                                    ? "Margem de Risco"
-                                    : item.safetyGate === "missing_market_reference"
-                                      ? "Sem Mercado"
-                                      : "Revisão"}
-                              </>
-                            )}
-                            {item.safetyStatus === "unchanged" && "Alinhado"}
-                          </span>
+                          <span className={`safety-pill ${item.safetyStatus}`}>{statusLabel(item)}</span>
+                          <span className="seller-reason">{item.safetyReason}</span>
                         </td>
                         <td style={{ textAlign: "right" }}>
                           <button
                             type="button"
                             className="row-action"
-                            disabled={
-                              loading ||
-                              channel !== "counter" ||
-                              Math.abs(item.priceDifference) < 0.01
-                            }
-                            onClick={() => handleApplySingle(item.id)}
+                            disabled={loading}
+                            onClick={() => setReviewItem(item)}
                             style={{
                               background: isSafe ? "var(--violet-soft)" : "#f0f1f5",
                               color: isSafe ? "var(--violet)" : "#5a5e73",
@@ -596,7 +577,7 @@ export function AutopilotView({
                               borderRadius: "7px",
                             }}
                           >
-                            Aplicar
+                            Ver detalhes
                           </button>
                         </td>
                       </tr>
@@ -606,14 +587,29 @@ export function AutopilotView({
               </table>
 
               {displayedItems.length === 0 && (
-                <div className="empty">
-                  Nenhum produto encontrado na fila para os filtros selecionados.
+                <div className="empty" style={{ padding: "36px 20px" }}>
+                  {queue.stats.totalItems === 0
+                    ? "Sua fila do Autopilot está vazia no momento. Adicione cartas ao seu estoque pelo Catálogo ou cadastre produtos avulsos e vincule cotações na tela de Mercado para receber recomendações inteligentes de preço."
+                    : "Nenhum produto encontrado na fila para os filtros selecionados."}
                 </div>
               )}
             </div>
           </section>
         </>
       )}
+
+      {reviewItem && <div className="drawer-layer" onMouseDown={() => setReviewItem(null)}><section className="modal-card seller-review" role="dialog" aria-modal="true" aria-label={`Revisão de preço de ${reviewItem.name}`} onMouseDown={(event) => event.stopPropagation()}>
+        <button type="button" className="drawer-close" onClick={() => setReviewItem(null)} aria-label="Fechar revisão">×</button>
+        <p className="eyebrow">DECISÃO DE PREÇO · BALCÃO FÍSICO</p>
+        <div className="seller-review-heading">{reviewItem.imageUrl && /^https:\/\//i.test(reviewItem.imageUrl) ? <img className="product-art large" src={reviewItem.imageUrl} alt={`Carta ${reviewItem.name}`}/> : <div className="product-art-placeholder large">{reviewItem.name.slice(0, 2).toUpperCase()}</div>}<div><h2>{reviewItem.name}</h2><p>{reviewItem.set ?? reviewItem.category} · SKU {reviewItem.sku}</p><span className={`safety-pill ${reviewItem.safetyStatus}`}>{statusLabel(reviewItem)}</span></div></div>
+        <div className="seller-review-prices"><div><span>Preço atual</span><strong>{money.format(reviewItem.currentPrice)}</strong></div><div><span>Sugestão</span><strong>{money.format(reviewItem.suggestedPrice)}</strong></div></div>
+        <p className="seller-review-reason">{reviewItem.safetyReason}</p>
+        <div className="seller-review-facts"><div><span>Custo de aquisição</span><strong>{money.format(reviewItem.cost)}</strong></div><div><span>Piso mínimo calculado</span><strong>{money.format(reviewItem.minimumPrice)}</strong></div><div><span>Referência BRL</span><strong>{reviewItem.marketPrice == null ? "Não disponível" : money.format(reviewItem.marketPrice)}</strong></div><div><span>Margem projetada</span><strong>{reviewItem.projectedMargin.toFixed(1)}%</strong></div></div>
+        {reviewItem.safetyStatus === "suspicious_flagged" && <p className="seller-review-warning">Esta sugestão exige revisão humana. Não será aplicada automaticamente.</p>}
+        <div className="seller-review-actions"><Link href="/products" className="secondary">Ver produtos</Link><Link href="/market" className="secondary">Ver mercado</Link><button type="button" className="primary" disabled={loading || !canManagePrices || channel !== "counter" || !canApply(reviewItem)} onClick={() => handleApplySingle(reviewItem.id)}>Confirmar preço no balcão</button></div>
+        {channel !== "counter" && <p className="muted">Loja virtual e marketplace estão em modo de simulação; nenhum preço é publicado nesses canais.</p>}
+        {!canApply(reviewItem) && channel === "counter" && <p className="muted">A aplicação fica disponível após corrigir os dados ou quando existir diferença real entre os preços.</p>}
+      </section></div>}
 
       {/* TAB 2: REGRAS & ESTRATÉGIAS */}
       {activeTab === "rules" && (
@@ -622,7 +618,7 @@ export function AutopilotView({
             <p style={{ margin: 0, color: "var(--muted)", fontSize: "13px" }}>
               Estratégias específicas por jogo, acabamento (foil) e canal com proteção de piso e teto de oscilação.
             </p>
-            <button
+            {canManagePrices && <button
               type="button"
               className="primary small"
               onClick={() => {
@@ -631,7 +627,7 @@ export function AutopilotView({
               }}
             >
               <Plus size={16} /> Nova Regra de Precificação
-            </button>
+            </button>}
           </div>
 
           <div className="rules-grid">
@@ -687,7 +683,7 @@ export function AutopilotView({
                   </span>
                 </div>
 
-                <div style={{ display: "flex", gap: "8px", marginTop: "auto", paddingTop: "8px" }}>
+                {canManagePrices && <div style={{ display: "flex", gap: "8px", marginTop: "auto", paddingTop: "8px" }}>
                   <button
                     type="button"
                     className="secondary"
@@ -712,7 +708,7 @@ export function AutopilotView({
                   >
                     Excluir
                   </button>
-                </div>
+                </div>}
               </div>
             ))}
           </div>
@@ -788,7 +784,7 @@ export function AutopilotView({
                             type="button"
                             className="secondary danger"
                             style={{ height: "32px", fontSize: "11px", display: "inline-flex", gap: "5px" }}
-                            disabled={loading}
+                            disabled={loading || !canManagePrices}
                             onClick={() => handleRollbackBatch(batch.id)}
                           >
                             <Undo2 size={13} /> Desfazer (Rollback)

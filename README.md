@@ -2,7 +2,7 @@
 
 Para a instalacao conectada ao Supabase, consulte [docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md). O inicializador reconhece PostgreSQL remoto sem Docker; migrations e seed remotos exigem execucao explicita depois de backup.
 
-Estado técnico mais recente: [PHASE8_2_FINAL_VALIDATION.md](PHASE8_2_FINAL_VALIDATION.md). A aplicação principal usa Supabase; o PostgreSQL local descrito abaixo é uma opção para instalações separadas.
+Estado técnico mais recente: [PROJECT_STATUS.md](PROJECT_STATUS.md). A aplicação principal usa Supabase; o PostgreSQL local descrito abaixo é uma opção para instalações separadas.
 
 SaaS B2B multiempresa para controle de estoque e inteligência de preços de lojas de TCG e produtos geek.
 
@@ -22,7 +22,7 @@ SaaS B2B multiempresa para controle de estoque e inteligência de preços de loj
 - Organizações e papéis `owner`, `admin` e `member`.
 - Revalidação de membership no servidor e isolamento estrito por `organization_id`.
 - Isolamento multi-tenant de SKU: SKUs internos são exclusivos por organização (`inventory_org_sku_uidx`), com variantes não catalogadas protegidas contra sequestro entre lojas.
-- Schema PostgreSQL com migrations SQL (até `0012_supabase_api_isolation.sql`), índices, constraints e proteção da Data API.
+- Schema PostgreSQL com migrations SQL (até `0013_distributed_integrity.sql`), índices, constraints e proteção da Data API.
 - CRUD HTTP de estoque com busca, filtro por categoria e paginação.
 - Catálogo multijogo (Pokémon via TCGdex e Magic via Scryfall) e cadastro inteligente.
 - Módulo de importação de referências de mercado brasileiras (BRL) via CSV em duas etapas (`preview` e `commit`), com validação Zod, deduplicação por hash/fingerprint e persistência em `price_observations`.

@@ -87,7 +87,7 @@ try {
   // PASSO 3: Cadastrar manualmente um produto
   console.log("-> Passo 3: Cadastrar manualmente um produto");
   await page.goto(`${origin}/products`);
-  await page.getByRole("button", { name: /Novo produto/ }).click();
+  await page.getByRole("button", { name: /Produto manual/ }).click();
   const manualName = `Playmat Customizado F93 ${runId.slice(-4)}`;
   const manualSku = `ACC-PLAY-${runId.slice(-4)}`;
   const modalForm = page.locator("form").filter({ has: page.getByRole("button", { name: "Salvar produto" }) });
@@ -160,7 +160,6 @@ try {
   const magicRes = await magicSave;
   assert.equal(magicRes.status(), 201, "Smart Magic registration returned 201");
   await page.getByText(/foi incluída no estoque/).waitFor();
-  results.push("Passo 5: Carta Magic cadastrada via Scryfall e vinculada");
   results.push("Passo 5: Carta Magic cadastrada via Scryfall e vinculada");
 
   // PASSO 6 & 7: Editar produtos e quantidades, configurar custo e preço de venda
@@ -253,12 +252,12 @@ ${csvSleeveName},pt-BR,new,standard,REFERENCIA PRIVADA F93,reference,BRL,52.00,$
     mimeType: "text/csv",
     buffer: Buffer.from(brlCsv),
   });
-  const brlButton = page.getByRole("button", { name: "Confirmar importacao BRL" });
+  const brlButton = page.getByRole("button", { name: /Confirmar e Gravar .*Cotação/ });
   await brlButton.waitFor();
   const brlCommit = page.waitForResponse((r) => r.url().includes("/partner-import/commit"));
   await brlButton.click();
   assert.equal((await brlCommit).status(), 201, "BRL Partner import commit returned 201");
-  await page.getByText(/novas cotacoes BRL registradas/).waitFor();
+  await page.getByText(/cotação\(ões\) BRL registrada/).waitFor();
   results.push("Passo 11: Cotações privadas BRL importadas com sucesso");
 
   // PASSO 12: Verificar a origem e a data das referências
@@ -271,9 +270,10 @@ ${csvSleeveName},pt-BR,new,standard,REFERENCIA PRIVADA F93,reference,BRL,52.00,$
   // PASSO 13: Gerar e visualizar recomendações de preço
   console.log("-> Passo 13: Gerar e visualizar recomendações no Autopilot");
   await page.goto(`${origin}/recommendations`);
-  await page.getByPlaceholder("Buscar por carta, coleção ou SKU...").fill(csvDeckboxName);
+  await page.getByPlaceholder("Buscar carta, coleção ou SKU").fill(csvDeckboxName);
   const deckboxRow = page.locator("tr").filter({ hasText: csvDeckboxName });
   await deckboxRow.waitFor();
+  await page.screenshot({ path: ".tools/autopilot-queue.png", fullPage: true });
   results.push("Passo 13: Recomendação calculada e exibida na fila do Autopilot");
 
   // PASSO 14: Conferir matematicamente o preço mínimo
@@ -282,7 +282,9 @@ ${csvSleeveName},pt-BR,new,standard,REFERENCIA PRIVADA F93,reference,BRL,52.00,$
   // Denominador = 1 - 0.10 - 0.05 - 0.20 = 0.65.
   // Preço Mínimo = 30 / 0.65 = 46.1538 -> R$ 46,15 (ou 46,16).
   // Mercado = 75.00. Preço sugerido com 2% desc = 73.50 (ends_90 -> 73.90).
-  const minPriceCell = await deckboxRow.locator("td").nth(3).innerText();
+  await deckboxRow.getByRole("button", { name: "Ver detalhes" }).click();
+  await page.screenshot({ path: ".tools/autopilot-review.png", fullPage: true });
+  const minPriceCell = await page.locator(".seller-review-facts > div").filter({ hasText: "Piso mínimo calculado" }).innerText();
   const cleanMinPrice = Number(minPriceCell.replace(/[^0-9,]/g, "").replace(",", "."));
   assert.ok(cleanMinPrice >= 46.15 && cleanMinPrice <= 46.16, `Piso rentável R$ ${cleanMinPrice} confere com 30 / 0.65`);
   results.push(`Passo 14: Piso rentável R$ ${cleanMinPrice.toFixed(2)} matematicamente auditado`);
@@ -290,7 +292,8 @@ ${csvSleeveName},pt-BR,new,standard,REFERENCIA PRIVADA F93,reference,BRL,52.00,$
   // PASSO 15: Aprovar manualmente uma recomendação
   console.log("-> Passo 15: Aprovar manualmente uma recomendação");
   const applyPost = page.waitForResponse((r) => r.url().includes("/api/autopilot/apply") && r.request().method() === "POST");
-  await deckboxRow.getByRole("button", { name: "Aplicar", exact: true }).click();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Confirmar preço no balcão" }).click();
   const applyRes = await applyPost;
   assert.equal(applyRes.status(), 200, "Autopilot apply returned 200");
   const applyBody = await applyRes.json();
@@ -311,7 +314,7 @@ ${csvSleeveName},pt-BR,new,standard,REFERENCIA PRIVADA F93,reference,BRL,52.00,$
   // PASSO 17: Verificar histórico e auditoria
   console.log("-> Passo 17: Verificar histórico e auditoria do lote");
   await page.goto(`${origin}/recommendations`);
-  await page.getByRole("button", { name: /Histórico de Lotes & Rollback/ }).click();
+  await page.getByRole("button", { name: /Histórico e desfazer/ }).click();
   const batchRow = page.locator("tbody tr").first();
   await batchRow.waitFor();
   assert.ok((await batchRow.innerText()).includes("Aplicado") || (await batchRow.innerText()).includes("applied"), "Status do lote é aplicado");
@@ -364,8 +367,8 @@ ${csvSleeveName},pt-BR,new,standard,REFERENCIA PRIVADA F93,reference,BRL,52.00,$
 } catch (error) {
   console.error("FALHA NA JORNADA DO NAVEGADOR:", error);
   await page.screenshot({ path: ".tools/phase93-browser-failure.png", fullPage: true });
-  throw error;
+  process.exitCode = 1;
 } finally {
   await browser.close();
-  process.exit(0);
+  process.exit(process.exitCode || 0);
 }

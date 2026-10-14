@@ -22,7 +22,7 @@ export async function listInventory(organizationId: string, query: z.infer<typeo
     .innerJoin(inventoryItems, and(eq(inventoryItems.variantId, externalListings.variantId), eq(inventoryItems.organizationId, organizationId)))
     .groupBy(externalListings.variantId).as("market");
   const [rows, totalResult] = await Promise.all([
-    db.select({ id: inventoryItems.id, name: products.name, category: products.category, set: productVariants.setName,
+    db.select({ id: inventoryItems.id, name: products.name, imageUrl: products.imageUrl, category: products.category, set: productVariants.setName,
       code: productVariants.collectorNumber, sku: sql<string>`coalesce(${inventoryItems.organizationSku}, ${productVariants.sku})`, cost: inventoryItems.cost, currentPrice: inventoryItems.price,
       stock: inventoryItems.quantity, desiredMarginPercent: inventoryItems.desiredMarginPercent, marketPrice: market.marketPrice,
       language: productVariants.language, condition: productVariants.condition, finish: productVariants.finish, rarity: productVariants.rarity,
@@ -46,7 +46,7 @@ export async function listAllInventory(organizationId: string) {
     .groupBy(externalListings.variantId).as("market");
 
   const rows = await db.select({
-    id: inventoryItems.id, name: products.name, category: products.category, set: productVariants.setName,
+    id: inventoryItems.id, name: products.name, imageUrl: products.imageUrl, category: products.category, set: productVariants.setName,
     code: productVariants.collectorNumber, sku: sql<string>`coalesce(${inventoryItems.organizationSku}, ${productVariants.sku})`, cost: inventoryItems.cost, currentPrice: inventoryItems.price,
     stock: inventoryItems.quantity, desiredMarginPercent: inventoryItems.desiredMarginPercent, marketPrice: market.marketPrice,
     language: productVariants.language, condition: productVariants.condition, finish: productVariants.finish, rarity: productVariants.rarity,

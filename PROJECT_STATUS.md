@@ -1,6 +1,14 @@
 # GeekPrice — situação do projeto
 
-## Estado atual — Fase 9.3 (14/10/2026) — Marco 1 Concluído
+## Estado atual — Autopilot e interface comercial (14/10/2026)
+
+- O banco comercial `postgres` recebeu a migration `0013_distributed_integrity.sql` após backup lógico completo em `backups/supabase-2026-10-14T17-25-25-485Z.dump` (SHA-256 `2f7210de9e55e118432d8d46dd70a4b5f9847aec021f6c243ed8a9d67cdfeb7a`). Arquivo validado por catálogo e decodificação; restauração ainda não ensaiada. A cadeia `0000`–`0013` foi confirmada por leitura no banco comercial.
+- O Autopilot agora apresenta uma revisão de preço com valor atual, sugestão, custo, piso, referência BRL e motivo da trava; custo ou preço zerado não é tratado como sugestão segura. Seleções mistas inválidas são rejeitadas sem aplicação parcial.
+- Membros da equipe consultam as sugestões; alterações de preços, regras automáticas e rollback continuam limitados a administradores/owner. Canais de loja virtual e marketplace permanecem apenas em simulação.
+- Três arquivos `loading.tsx` órfãos em segmentos sem página foram removidos; o carregamento global permanece.
+- Validação final: 85 testes unitários, 32 testes de integração PostgreSQL isolado (23 + 9), 20 etapas de navegador incluindo aplicação/rollback, typecheck e build de produção aprovados. ESLint: 0 erros e 2 avisos preexistentes de navegação em telas de autenticação/onboarding.
+
+## Estado anterior — Fase 9.3 (14/10/2026) — Marco 1 Concluído
 
 O estado técnico vigente e comprovado está documentado em [PHASE9_3_FUNCTIONAL_MVP_REPORT.md](PHASE9_3_FUNCTIONAL_MVP_REPORT.md). A Fase 9.3 consolidou o GeekPrice como um programa SaaS utilizável e funcional (Marco 1):
 - **Validação Completa no Navegador:** Jornada real de 20 passos executada com Playwright Chromium em ambiente de produção Next.js conectado ao PostgreSQL 17.11 isolado (`geekprice_phase81_test_1791978720676`). Todos os 20 passos aprovados com 0 erros de página.

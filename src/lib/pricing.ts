@@ -10,6 +10,8 @@ export type PriceSafetyStatus =
 
 export type SafetyGate =
   | "none"
+  | "missing_cost"
+  | "missing_current_price"
   | "spike_threshold_exceeded"
   | "margin_below_minimum"
   | "missing_market_reference";
@@ -167,7 +169,17 @@ export function calculateRecommendation(input: PricingInput): PricingResult {
   let safetyFlag: string | null = null;
   let safetyReason = `Alteração segura (${percentageChange >= 0 ? "+" : ""}${percentageChange}%) com margem de ${projectedMargin.toFixed(1)}%.`;
 
-  if (input.marketPrice == null) {
+  if (input.cost <= 0) {
+    safetyStatus = "suspicious_flagged";
+    safetyGate = "missing_cost";
+    safetyFlag = "Informe o custo de aquisição do produto antes de usar uma sugestão de preço.";
+    safetyReason = safetyFlag;
+  } else if (currentPrice <= 0) {
+    safetyStatus = "suspicious_flagged";
+    safetyGate = "missing_current_price";
+    safetyFlag = "Informe o preço de venda atual para comparar a sugestão com segurança.";
+    safetyReason = safetyFlag;
+  } else if (input.marketPrice == null) {
     safetyStatus = "suspicious_flagged";
     safetyGate = "missing_market_reference";
     safetyFlag = "Sem cotação externa de mercado: cálculo restrito a custo, taxas e margem desejada.";

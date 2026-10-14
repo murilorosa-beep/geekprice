@@ -16,6 +16,7 @@ export default async function RecommendationsPage() {
 
   return (
     <AutopilotView
+      canManagePrices={(actor.role === "owner" || actor.role === "admin") && actor.access !== "read_only"}
       initialQueue={initialQueue}
       initialRules={initialRules}
       initialBatches={initialBatches}

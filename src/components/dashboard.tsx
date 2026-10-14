@@ -113,6 +113,48 @@ export function Dashboard({ initialData }: { initialData: DashboardData }) {
         </div>
       </section>
 
+      {products.length === 0 && (
+        <section
+          className="panel"
+          style={{
+            padding: "20px 24px",
+            marginBottom: 24,
+            borderLeft: "4px solid #6366f1",
+            background: "rgba(99, 102, 241, 0.05)",
+          }}
+        >
+          <h2 style={{ fontSize: "1.15rem", margin: "0 0 6px 0", fontWeight: 600 }}>
+            Bem-vindo ao GeekPrice! Primeiros passos da sua loja:
+          </h2>
+          <p style={{ margin: "0 0 16px 0", color: "var(--muted-foreground)", fontSize: "0.88rem", lineHeight: 1.5 }}>
+            Seu ambiente está pronto. Para começar a gerenciar seu estoque e ativar a inteligência de precificação com o Autopilot, escolha uma opção:
+          </p>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <Link
+              href="/catalog"
+              className="primary small"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, textDecoration: "none" }}
+            >
+              <Sparkles size={16} /> 1. Cadastrar Cartas pelo Catálogo (Pokémon / Magic)
+            </Link>
+            <Link
+              href="/products"
+              className="secondary small"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, textDecoration: "none" }}
+            >
+              <PackageSearch size={16} /> 2. Cadastrar Produto Avulso no Estoque
+            </Link>
+            <button
+              className="secondary small"
+              onClick={() => setImportOpen(true)}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
+              <Upload size={16} /> 3. Importar Estoque via Planilha CSV
+            </button>
+          </div>
+        </section>
+      )}
+
       <section className="metrics">
         <Metric icon={<PackageSearch />} label="Produtos cadastrados" value={String(products.length)} detail="itens carregados" tone="violet" />
         <Metric icon={<Gauge />} label="Estoque total" value={String(summary.totalStock)} detail="unidades cadastradas" tone="green" up />
@@ -134,7 +176,7 @@ export function Dashboard({ initialData }: { initialData: DashboardData }) {
         <div className="panel-title products-title"><div><h2>Produtos que precisam de atenção</h2><p>Priorizados pelo impacto potencial na sua margem</p></div><button className="secondary" onClick={exportProducts}><Download size={16}/>Exportar CSV</button></div>
         <div className="table-wrap"><table><thead><tr><th>PRODUTO</th><th>SEU PREÇO</th><th>MERCADO</th><th>DIFERENÇA</th><th>ESTOQUE</th><th>STATUS</th><th></th></tr></thead><tbody>
           {visibleProducts.map((product) => <ProductRow key={product.id} product={product} onOpen={() => setSelected(product)} />)}
-        </tbody></table>{filtered.length === 0 && <div className="empty">Nenhum produto encontrado para “{query}”.</div>}</div>
+        </tbody></table>{filtered.length === 0 && <div className="empty">{products.length === 0 ? "Seu estoque ainda não possui produtos. Utilize os botões de ação acima para cadastrar seus primeiros itens." : `Nenhum produto encontrado para “${query}”.`}</div>}</div>
         {filtered.length > pageSize && (
           <div className="pagination">
             <span>{filtered.length} produto(s) · página {page} de {totalPages}</span>

@@ -40,6 +40,7 @@ export function isRuleEligibleForAutoApply(
 export type AutopilotItemView = {
   id: string;
   name: string;
+  imageUrl?: string | null;
   category: string;
   sku: string;
   set: string | null;
@@ -250,6 +251,7 @@ export function evaluateAutopilotItemChunk(
   items: Array<{
     id: string;
     name: string;
+    imageUrl?: string | null;
     category: string;
     sku: string;
     set?: string | null;
@@ -309,6 +311,7 @@ export function evaluateAutopilotItemChunk(
     const itemView: AutopilotItemView = {
       id: item.id,
       name: item.name,
+      imageUrl: item.imageUrl ?? null,
       category: item.category,
       sku: item.sku,
       set: item.set ?? null,
@@ -335,14 +338,13 @@ export function evaluateAutopilotItemChunk(
       stock: item.stock,
     };
 
-    marginSum += calc.projectedMargin;
-    potentialRevenueImpact += calc.priceDifference * item.stock;
-
     if (calc.safetyStatus === "safe_auto") {
       if (Math.abs(calc.priceDifference) < 0.01) {
         unchanged.push(itemView);
       } else {
         safe.push(itemView);
+        marginSum += calc.projectedMargin;
+        potentialRevenueImpact += calc.priceDifference * item.stock;
       }
     } else if (calc.safetyStatus === "unchanged") {
       unchanged.push(itemView);
@@ -380,7 +382,7 @@ export async function getAutopilotQueue(
   );
 
   const totalItems = inventory.items.length;
-  const averageProjectedMargin = totalItems > 0 ? Number((marginSum / totalItems).toFixed(1)) : 0;
+  const averageProjectedMargin = safe.length > 0 ? Number((marginSum / safe.length).toFixed(1)) : 0;
 
   return {
     channel,
@@ -420,17 +422,24 @@ export async function applyPriceBatch(
   let targetItems: AutopilotItemView[] = [];
 
   if (input.applyAllSafe) {
-    targetItems = queue.safe;
+    targetItems = queue.safe.filter((item) => item.cost > 0 && item.currentPrice > 0 && item.suggestedPrice > 0 && Math.abs(item.priceDifference) >= 0.01);
   } else if (input.itemIds && input.itemIds.length > 0) {
     const idSet = new Set(input.itemIds);
     const combined = [...queue.safe, ...queue.flagged];
-    targetItems = combined.filter((item) => idSet.has(item.id) && Math.abs(item.priceDifference) >= 0.01);
+    targetItems = combined.filter((item) => idSet.has(item.id) && item.cost > 0 && item.currentPrice > 0 && item.suggestedPrice > 0 && item.safetyGate !== "margin_below_minimum" && Math.abs(item.priceDifference) >= 0.01);
+    if (targetItems.length !== idSet.size) {
+      return {
+        success: false,
+        message: "A seleção mudou ou contém produto sem dados suficientes. Atualize as sugestões e revise os itens antes de confirmar; nenhum preço foi alterado.",
+        batch: null,
+      };
+    }
   }
 
   if (targetItems.length === 0) {
     return {
       success: false,
-      message: "Nenhum produto qualificado ou selecionado para atualização.",
+      message: "Nenhum preço pode ser aplicado. Confira custo e preço atual em Produtos, revise as travas e selecione um item com mudança real.",
       batch: null,
     };
   }
