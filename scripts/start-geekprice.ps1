@@ -52,7 +52,7 @@ try {
     # Hosted PostgreSQL uses the configured connection and never starts Docker,
     # migrates, or seeds implicitly. Inspect/backup precede database changes.
     if (Test-Path -LiteralPath (Join-Path $projectRoot ".env")) {
-        $remoteDatabase = & node --env-file=.env -e 'const u=new URL(process.env.DATABASE_URL); console.log(!["localhost","127.0.0.1","::1"].includes(u.hostname))'
+        $remoteDatabase = & node --env-file=.env scripts/check-remote-db.mjs
         if ($LASTEXITCODE -ne 0) { throw "DATABASE_URL invalida no .env." }
         if ($remoteDatabase -eq "true") {
             if (-not $SkipInstall -and -not (Test-Path -LiteralPath (Join-Path $projectRoot "node_modules"))) {
