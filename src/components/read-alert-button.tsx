@@ -1,0 +1,1 @@
+"use client"; import { useRouter } from "next/navigation"; export function ReadAlertButton({id}:{id:string}){const router=useRouter();return <button className="row-action" onClick={async()=>{await fetch(`/api/alerts/${id}`,{method:"PATCH"});router.refresh()}}>Marcar como lido</button>}

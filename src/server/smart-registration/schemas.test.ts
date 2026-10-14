@@ -1,0 +1,3 @@
+import {describe,expect,it} from "vitest"; import {smartCardInputSchema} from "./schemas";
+const valid={externalCardId:"base1-58",language:"pt-br",finish:"normal",condition:"near_mint",organizationSku:"LOJA-001",barcode:"",cost:"10.50",price:"20",quantity:2,desiredMarginPercent:25};
+describe("cadastro inteligente",()=>{it("normaliza valores monetários privados",()=>{const value=smartCardInputSchema.parse(valid);expect(value.cost).toBe("10.50");expect(value.price).toBe("20.00")});it("recusa código de barras textual",()=>expect(smartCardInputSchema.safeParse({...valid,barcode:"base1-58"}).success).toBe(false));it("exige SKU próprio da organização",()=>expect(smartCardInputSchema.safeParse({...valid,organizationSku:""}).success).toBe(false))});

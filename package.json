@@ -1,0 +1,62 @@
+{
+  "name": "geekprice",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:auth": "tsx --env-file=.env scripts/verify-auth-flow.ts",
+    "test:watch": "vitest",
+    "test:integration": "node --env-file=.env --env-file=.env.phase81 node_modules/vitest/vitest.mjs run --config vitest.integration.config.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio",
+    "db:inspect": "node --env-file=.env scripts/inspect-validation-environment.mjs",
+    "db:backup": "node --env-file=.env scripts/backup-postgres.mjs",
+    "db:seed": "tsx --env-file=.env scripts/seed.ts",
+    "db:repair-admin": "tsx --env-file=.env scripts/repair-local-admin-password.ts",
+    "worker:autopilot": "tsx --env-file=.env scripts/run-autopilot-worker.ts",
+    "worker:autopilot:once": "tsx --env-file=.env scripts/run-autopilot-worker.ts --once",
+    "db:check": "tsx scripts/verify-migration-snapshots.ts"
+  },
+  "dependencies": {
+    "@next/env": "^16.4.0",
+    "@radix-ui/react-slot": "latest",
+    "argon2": "^0.45.1",
+    "bcryptjs": "^3.0.3",
+    "class-variance-authority": "latest",
+    "clsx": "latest",
+    "csv-parse": "^7.0.3",
+    "decimal.js": "^10.6.0",
+    "drizzle-orm": "^0.45.4",
+    "lucide-react": "latest",
+    "next": "latest",
+    "next-auth": "^4.24.15",
+    "postgres": "^3.4.9",
+    "react": "latest",
+    "react-dom": "latest",
+    "tailwind-merge": "latest",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.0",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "drizzle-kit": "^0.31.11",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.4.0",
+    "tsx": "^4.23.15",
+    "typescript": "latest",
+    "vitest": "^5.0.3"
+  },
+  "overrides": {
+    "@esbuild-kit/core-utils": {
+      "esbuild": "^0.25.12"
+    }
+  }
+}

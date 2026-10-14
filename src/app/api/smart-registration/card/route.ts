@@ -1,0 +1,2 @@
+import { authErrorResponse,requireOrganization } from "@/server/auth/context"; import { smartCardInputSchema } from "@/server/smart-registration/schemas"; import { registerSmartCard } from "@/server/smart-registration/service";
+export async function POST(request:Request){try{const actor=await requireOrganization("admin");return Response.json(await registerSmartCard(actor.organizationId,smartCardInputSchema.parse(await request.json())),{status:201})}catch(error){return authErrorResponse(error)}}

@@ -1,0 +1,2 @@
+import { z } from "zod"; import { authErrorResponse,requireOrganization } from "@/server/auth/context"; import { findBookByIsbn } from "@/server/catalog/isbn";
+export async function GET(request:Request){try{await requireOrganization();const code=z.string().min(8).max(24).parse(new URL(request.url).searchParams.get("code"));return Response.json({items:await findBookByIsbn(code)})}catch(error){return authErrorResponse(error)}}

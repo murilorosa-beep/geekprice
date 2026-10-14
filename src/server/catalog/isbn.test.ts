@@ -1,0 +1,2 @@
+import {describe,expect,it} from "vitest"; import {isValidIsbn,normalizeIsbn} from "./isbn";
+describe("ISBN",()=>{it("valida ISBN-10 e ISBN-13",()=>{expect(isValidIsbn("978-85-359-0277-8")).toBe(true);expect(isValidIsbn("0-306-40615-2")).toBe(true)});it("não interpreta qualquer código de barras como ISBN",()=>{expect(isValidIsbn("7891234567895")).toBe(false);expect(isValidIsbn("ABC123")).toBe(false)});it("normaliza sem alterar o identificador",()=>expect(normalizeIsbn(" 0-8044-2957-X ")).toBe("080442957X"))});

@@ -1,0 +1,3 @@
+import { z } from "zod";
+const money=z.coerce.number().finite().min(0).max(99_999_999.99).transform(v=>v.toFixed(2));
+export const smartCardInputSchema=z.object({externalCardId:z.string().trim().min(1).max(180),language:z.string().trim().min(2).max(12).default("pt-br"),finish:z.string().trim().min(1).max(40),condition:z.string().trim().min(1).max(40),organizationSku:z.string().trim().min(1).max(120),barcode:z.string().trim().regex(/^\d{8,14}$/,"Código de barras deve ter entre 8 e 14 dígitos.").optional().or(z.literal("")),cost:money,price:money,quantity:z.coerce.number().int().min(0).max(1_000_000),desiredMarginPercent:z.coerce.number().min(0).max(99).transform(v=>v.toFixed(4))});

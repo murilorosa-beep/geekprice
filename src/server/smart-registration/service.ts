@@ -1,0 +1,24 @@
+import "server-only";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { inventoryItems, products, productVariants } from "@/db/schema";
+import { assertProductCapacity } from "@/server/billing/limits";
+import { tcgdexConnector } from "@/server/market/tcgdex";
+import { linkAndCollect } from "@/server/market/service";
+import { linkScryfallAndCollect } from "@/server/market/service";
+import { scryfallConnector } from "@/server/market/scryfall";
+
+type Input={externalCardId:string;language:string;finish:string;condition:string;organizationSku:string;barcode?:string;cost:string;price:string;quantity:number;desiredMarginPercent:string};
+export async function registerSmartCard(organizationId:string,input:Input){
+ const card=await tcgdexConnector.getCard(input.externalCardId,input.language); if(card.finishes.length&&!card.finishes.includes(input.finish))throw new Error("O acabamento escolhido não pertence à variante retornada pelo catálogo.");
+ const inventory=await db.transaction(async tx=>{let[variant]=await tx.select().from(productVariants).where(and(eq(productVariants.catalogSource,"tcgdex"),eq(productVariants.canonicalId,card.id),eq(productVariants.language,card.language),eq(productVariants.condition,input.condition),eq(productVariants.finish,input.finish))).limit(1);if(!variant){const[product]=await tx.insert(products).values({name:card.name,category:"Pokémon TCG",imageUrl:card.image}).returning();[variant]=await tx.insert(productVariants).values({productId:product.id,sku:`tcgdex:${card.language}:${card.id}:${input.finish}:${input.condition}`.slice(0,120),setName:card.setName,collectorNumber:card.localId,language:card.language,condition:input.condition,finish:input.finish,rarity:card.rarity,catalogSource:"tcgdex",canonicalId:card.id}).returning()}
+ const[duplicateSku]=await tx.select({id:inventoryItems.id}).from(inventoryItems).where(and(eq(inventoryItems.organizationId,organizationId),eq(inventoryItems.organizationSku,input.organizationSku))).limit(1);if(duplicateSku)throw new Error("Este SKU já existe nesta organização.");await assertProductCapacity(tx,organizationId);
+ const[item]=await tx.insert(inventoryItems).values({organizationId,variantId:variant.id,organizationSku:input.organizationSku,barcode:input.barcode||null,cost:input.cost,price:input.price,quantity:input.quantity,desiredMarginPercent:input.desiredMarginPercent}).onConflictDoNothing({target:[inventoryItems.organizationId,inventoryItems.variantId]}).returning();if(!item)throw new Error("Esta variante já está no estoque. Use a edição do produto para alterar custo, preço ou quantidade.");return item});
+ const market=await linkAndCollect(organizationId,{inventoryItemId:inventory.id,externalCardId:card.id,language:card.language});return{inventory,card,observationsInserted:market?.observationsInserted??0};
+}
+
+export async function registerSmartMagicCard(organizationId:string,input:Input){
+ const card=await scryfallConnector.getCard(input.externalCardId,input.language);if(card.finishes.length&&!card.finishes.includes(input.finish))throw new Error("O acabamento escolhido não pertence à impressão selecionada.");
+ const inventory=await db.transaction(async tx=>{let[variant]=await tx.select().from(productVariants).where(and(eq(productVariants.catalogSource,"scryfall"),eq(productVariants.canonicalId,card.id),eq(productVariants.language,card.language),eq(productVariants.condition,input.condition),eq(productVariants.finish,input.finish))).limit(1);if(!variant){const[product]=await tx.insert(products).values({name:card.name,category:"Magic: The Gathering",imageUrl:card.image}).returning();[variant]=await tx.insert(productVariants).values({productId:product.id,sku:`scryfall:${card.id}:${input.finish}:${input.condition}`.slice(0,120),setName:card.setName,collectorNumber:card.localId,language:card.language,condition:input.condition,finish:input.finish,rarity:card.rarity,catalogSource:"scryfall",canonicalId:card.id}).returning()}const[duplicateSku]=await tx.select({id:inventoryItems.id}).from(inventoryItems).where(and(eq(inventoryItems.organizationId,organizationId),eq(inventoryItems.organizationSku,input.organizationSku))).limit(1);if(duplicateSku)throw new Error("Este SKU já existe nesta organização.");await assertProductCapacity(tx,organizationId);const[item]=await tx.insert(inventoryItems).values({organizationId,variantId:variant.id,organizationSku:input.organizationSku,barcode:input.barcode||null,cost:input.cost,price:input.price,quantity:input.quantity,desiredMarginPercent:input.desiredMarginPercent}).onConflictDoNothing({target:[inventoryItems.organizationId,inventoryItems.variantId]}).returning();if(!item)throw new Error("Esta impressão já está no estoque. Edite o item existente.");return item});
+ const market=await linkScryfallAndCollect(organizationId,inventory.id,card.id);return{inventory,card,observationsInserted:market?.observationsInserted??0};
+}
