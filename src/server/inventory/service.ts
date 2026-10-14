@@ -15,7 +15,11 @@ export async function listInventory(organizationId: string, query: z.infer<typeo
   if (query.availability === "in_stock") filters.push(gt(inventoryItems.quantity, 0));
   if (query.availability === "out_of_stock") filters.push(eq(inventoryItems.quantity, 0));
   const where = and(...filters);
-  const market = db.select({ variantId: externalListings.variantId, marketPrice: sql<string>`avg(${priceObservations.price})`.as("market_price") })
+  const market = db.select({
+    variantId: externalListings.variantId,
+    marketPrice: sql<string>`avg(${priceObservations.price})`.as("market_price"),
+    hasUnverifiedReference: sql<boolean>`bool_or(${sources.kind} = 'national_public_quote' or coalesce(${sources.config}->>'type', '') = 'unverified_national_reference')`.as("has_unverified_reference"),
+  })
     .from(externalListings)
     .innerJoin(sources, and(eq(sources.id, externalListings.sourceId), eq(sources.organizationId, organizationId), eq(sources.active, true)))
     .innerJoin(priceObservations, and(eq(priceObservations.listingId, externalListings.id), eq(priceObservations.available, true), eq(priceObservations.currency, "BRL"), eq(priceObservations.region, "BR"), eq(priceObservations.type, "reference"), gte(priceObservations.referenceAt, freshSince)))
@@ -25,6 +29,7 @@ export async function listInventory(organizationId: string, query: z.infer<typeo
     db.select({ id: inventoryItems.id, name: products.name, imageUrl: products.imageUrl, category: products.category, set: productVariants.setName,
       code: productVariants.collectorNumber, sku: sql<string>`coalesce(${inventoryItems.organizationSku}, ${productVariants.sku})`, cost: inventoryItems.cost, currentPrice: inventoryItems.price,
       stock: inventoryItems.quantity, desiredMarginPercent: inventoryItems.desiredMarginPercent, marketPrice: market.marketPrice,
+      hasUnverifiedReference: market.hasUnverifiedReference,
       language: productVariants.language, condition: productVariants.condition, finish: productVariants.finish, rarity: productVariants.rarity,
       catalogSource: productVariants.catalogSource, canonicalId: productVariants.canonicalId,
       catalogLinked: sql<boolean>`exists (select 1 from external_listings el join sources s on s.id = el.source_id where el.variant_id = ${productVariants.id} and s.organization_id = ${organizationId} and s.kind in ('tcgdex', 'scryfall'))`,
@@ -34,13 +39,17 @@ export async function listInventory(organizationId: string, query: z.infer<typeo
     db.select({ value: count() }).from(inventoryItems).innerJoin(productVariants, eq(productVariants.id, inventoryItems.variantId))
       .innerJoin(products, eq(products.id, productVariants.productId)).where(where),
   ]);
-  return { items: rows.map((row) => ({ ...row, cost: Number(row.cost), currentPrice: Number(row.currentPrice), desiredMarginPercent: Number(row.desiredMarginPercent), marketPrice: row.marketPrice ? Number(row.marketPrice) : null })), total: totalResult[0]?.value ?? 0, page: query.page, pageSize: query.pageSize };
+  return { items: rows.map((row) => ({ ...row, cost: Number(row.cost), currentPrice: Number(row.currentPrice), desiredMarginPercent: Number(row.desiredMarginPercent), marketPrice: row.marketPrice ? Number(row.marketPrice) : null, hasUnverifiedReference: Boolean(row.hasUnverifiedReference) })), total: totalResult[0]?.value ?? 0, page: query.page, pageSize: query.pageSize };
 }
 
 export async function listAllInventory(organizationId: string) {
   const freshSince = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const where = eq(inventoryItems.organizationId, organizationId);
-  const market = db.select({ variantId: externalListings.variantId, marketPrice: sql<string>`avg(${priceObservations.price})`.as("market_price") })
+  const market = db.select({
+    variantId: externalListings.variantId,
+    marketPrice: sql<string>`avg(${priceObservations.price})`.as("market_price"),
+    hasUnverifiedReference: sql<boolean>`bool_or(${sources.kind} = 'national_public_quote' or coalesce(${sources.config}->>'type', '') = 'unverified_national_reference')`.as("has_unverified_reference"),
+  })
     .from(externalListings)
     .innerJoin(sources, and(eq(sources.id, externalListings.sourceId), eq(sources.organizationId, organizationId), eq(sources.active, true)))
     .innerJoin(priceObservations, and(eq(priceObservations.listingId, externalListings.id), eq(priceObservations.available, true), eq(priceObservations.currency, "BRL"), eq(priceObservations.region, "BR"), eq(priceObservations.type, "reference"), gte(priceObservations.referenceAt, freshSince)))
@@ -51,6 +60,7 @@ export async function listAllInventory(organizationId: string) {
     id: inventoryItems.id, name: products.name, imageUrl: products.imageUrl, category: products.category, set: productVariants.setName,
     code: productVariants.collectorNumber, sku: sql<string>`coalesce(${inventoryItems.organizationSku}, ${productVariants.sku})`, cost: inventoryItems.cost, currentPrice: inventoryItems.price,
     stock: inventoryItems.quantity, desiredMarginPercent: inventoryItems.desiredMarginPercent, marketPrice: market.marketPrice,
+    hasUnverifiedReference: market.hasUnverifiedReference,
     language: productVariants.language, condition: productVariants.condition, finish: productVariants.finish, rarity: productVariants.rarity,
   }).from(inventoryItems).innerJoin(productVariants, eq(productVariants.id, inventoryItems.variantId))
     .innerJoin(products, eq(products.id, productVariants.productId)).leftJoin(market, eq(market.variantId, productVariants.id))
@@ -62,6 +72,7 @@ export async function listAllInventory(organizationId: string) {
     currentPrice: Number(row.currentPrice),
     desiredMarginPercent: Number(row.desiredMarginPercent),
     marketPrice: row.marketPrice ? Number(row.marketPrice) : null,
+    hasUnverifiedReference: Boolean(row.hasUnverifiedReference),
   }));
 
   return { items, total: items.length, page: 1, pageSize: items.length };
@@ -78,6 +89,7 @@ export async function listInventoryChunk(
     .select({
       variantId: externalListings.variantId,
       marketPrice: sql<string>`avg(${priceObservations.price})`.as("market_price"),
+      hasUnverifiedReference: sql<boolean>`bool_or(${sources.kind} = 'national_public_quote' or coalesce(${sources.config}->>'type', '') = 'unverified_national_reference')`.as("has_unverified_reference"),
     })
     .from(externalListings)
     .innerJoin(
@@ -115,6 +127,7 @@ export async function listInventoryChunk(
       stock: inventoryItems.quantity,
       desiredMarginPercent: inventoryItems.desiredMarginPercent,
       marketPrice: market.marketPrice,
+      hasUnverifiedReference: market.hasUnverifiedReference,
       language: productVariants.language,
       condition: productVariants.condition,
       finish: productVariants.finish,
@@ -135,6 +148,7 @@ export async function listInventoryChunk(
     currentPrice: Number(row.currentPrice),
     desiredMarginPercent: Number(row.desiredMarginPercent),
     marketPrice: row.marketPrice ? Number(row.marketPrice) : null,
+    hasUnverifiedReference: Boolean(row.hasUnverifiedReference),
   }));
 }
 

@@ -40,6 +40,13 @@ import { applyPriceBatch, createPricingRule } from "@/server/autopilot/service";
 import { createPricingRuleSchema } from "@/server/autopilot/schemas";
 import { importBrlMarketReferences } from "@/server/market/partner-import";
 import { brlMarketRowSchema } from "@/server/market/partner-csv";
+import {
+  persistBrazilianQuoteForInventoryItem,
+  QuoteMismatchError,
+  InvalidQuoteTokenError,
+  ItemNotFoundError,
+} from "@/server/market/brazilian-service";
+import { signBrazilianQuote } from "@/server/market/brazilian-sources";
 
 const run = Date.now().toString();
 let orgA: string;
@@ -449,5 +456,169 @@ describe("Fase 9 — Testes de Integração com PostgreSQL Real Isolado", () => 
     // Deleção pela própria Loja A funciona
     const deleteOwn = await deleteOrganizationConnection(orgA, connectionAId);
     expect(deleteOwn).toBe(true);
+  });
+
+  it("persiste cotação BRL no PostgreSQL, bloqueia divergências de edição, rejeita tokens inválidos e aciona trava do Autopilot", async () => {
+    // 1. Cadastrar duas variantes do mesmo nome com edições diferentes na orgA
+    const item151 = await createInventoryItem(orgA, {
+      name: `Charizard Teste BRL ${run}`,
+      category: "tcg_pokemon",
+      setName: "151",
+      collectorNumber: "006",
+      sku: `PKM-CHAR-151-${run}`,
+      cost: 100,
+      price: 200,
+      quantity: 5,
+      desiredMarginPercent: 25,
+      language: "pt-BR",
+      condition: "near_mint",
+      finish: "standard",
+    });
+
+    const itemDestinos = await createInventoryItem(orgA, {
+      name: `Charizard Teste BRL ${run}`,
+      category: "tcg_pokemon",
+      setName: "Destinos Brilhantes",
+      collectorNumber: "006",
+      sku: `PKM-CHAR-DEST-${run}`,
+      cost: 80,
+      price: 160,
+      quantity: 3,
+      desiredMarginPercent: 25,
+      language: "pt-BR",
+      condition: "near_mint",
+      finish: "standard",
+    });
+
+    // 2. Criar cotação assinada para a edição 151
+    const quote151 = {
+      source: "ligapokemon" as const,
+      sourceLabel: "Liga Pokémon",
+      cardTitle: `Charizard Teste BRL ${run}`,
+      edition: "151",
+      collectorNumber: "006",
+      priceMin: 220,
+      priceAvg: 250,
+      priceMax: 300,
+      currency: "BRL" as const,
+      url: "https://www.ligapokemon.com.br/?view=cards/card&card=Charizard&ed=151&num=006",
+      observedAt: new Date().toISOString(),
+    };
+    const validToken151 = signBrazilianQuote(quote151);
+
+    // 3. Tentar vincular a cotação da 151 no item de Destinos Brilhantes -> BLOQUEADO por divergência de edição
+    await expect(
+      persistBrazilianQuoteForInventoryItem(orgA, itemDestinos.id, {
+        sourceLabel: quote151.sourceLabel,
+        price: 250,
+        cardTitle: quote151.cardTitle,
+        edition: quote151.edition,
+        collectorNumber: quote151.collectorNumber,
+        url: quote151.url,
+        observedAt: quote151.observedAt,
+        token: validToken151,
+      })
+    ).rejects.toThrowError(QuoteMismatchError);
+
+    // 4. Tentar com token adulterado -> BLOQUEADO
+    await expect(
+      persistBrazilianQuoteForInventoryItem(orgA, item151.id, {
+        sourceLabel: quote151.sourceLabel,
+        price: 50, // preço adulterado
+        cardTitle: quote151.cardTitle,
+        edition: quote151.edition,
+        collectorNumber: quote151.collectorNumber,
+        url: quote151.url,
+        observedAt: quote151.observedAt,
+        token: "token-falso-adulterado",
+      })
+    ).rejects.toThrowError(InvalidQuoteTokenError);
+
+    // 5. Tentar com token expirado -> BLOQUEADO
+    const expiredToken = `${Date.now() - 60_000}.22000.25000.30000.abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890`;
+    await expect(
+      persistBrazilianQuoteForInventoryItem(orgA, item151.id, {
+        sourceLabel: quote151.sourceLabel,
+        price: 250,
+        cardTitle: quote151.cardTitle,
+        edition: quote151.edition,
+        collectorNumber: quote151.collectorNumber,
+        url: quote151.url,
+        observedAt: quote151.observedAt,
+        token: expiredToken,
+      })
+    ).rejects.toThrowError(InvalidQuoteTokenError);
+
+    // 6. Tentar gravar a partir de outra organização (orgB tentando gravar no item da orgA) -> BLOQUEADO (ItemNotFoundError)
+    await expect(
+      persistBrazilianQuoteForInventoryItem(orgB, item151.id, {
+        sourceLabel: quote151.sourceLabel,
+        price: 250,
+        cardTitle: quote151.cardTitle,
+        edition: quote151.edition,
+        collectorNumber: quote151.collectorNumber,
+        url: quote151.url,
+        observedAt: quote151.observedAt,
+        token: validToken151,
+      })
+    ).rejects.toThrowError(ItemNotFoundError);
+
+    // 7. Gravação legítima no item correto (151) -> SUCESSO
+    const persisted = await persistBrazilianQuoteForInventoryItem(orgA, item151.id, {
+      sourceLabel: quote151.sourceLabel,
+      price: 250,
+      cardTitle: quote151.cardTitle,
+      edition: quote151.edition,
+      collectorNumber: quote151.collectorNumber,
+      url: quote151.url,
+      observedAt: quote151.observedAt,
+      token: validToken151,
+    });
+    expect(persisted.success).toBe(true);
+    expect(persisted.requiresManualApproval).toBe(true);
+
+    // 8. Tentativa de reutilização da mesma cotação -> IDEMPOTÊNCIA sem duplicar observações
+    const repeated = await persistBrazilianQuoteForInventoryItem(orgA, item151.id, {
+      sourceLabel: quote151.sourceLabel,
+      price: 250,
+      cardTitle: quote151.cardTitle,
+      edition: quote151.edition,
+      collectorNumber: quote151.collectorNumber,
+      url: quote151.url,
+      observedAt: quote151.observedAt,
+      token: validToken151,
+    });
+    expect(repeated.success).toBe(true);
+    expect(repeated.observationId).toBe("existing");
+
+    // 9. Verificar que item151 foi marcado com hasUnverifiedReference no estoque
+    const inventoryList = await listAllInventory(orgA);
+    const listedItem151 = inventoryList.items.find((i) => i.id === item151.id);
+    expect(listedItem151).toBeDefined();
+    expect(listedItem151!.hasUnverifiedReference).toBe(true);
+
+    // 10. Criar regra de precificação com autoApplySafe=true e rodar ciclo do Autopilot
+    // O item151 NÃO PODE ser aplicado automaticamente porque a fonte é não-homologada!
+    await createPricingRule(
+      orgA,
+      createPricingRuleSchema.parse({
+        name: `BRL Safety Rule ${run}`,
+        roundingMode: "none",
+        feePercent: 10,
+        additionalCostPercent: 5,
+        minimumMarginPercent: 20,
+        desiredMarginPercent: 25,
+        marketDiscountPercent: 0,
+        autoApplySafe: true,
+      })
+    );
+
+    await runAutopilotReevaluationCycle({ specificOrgId: orgA });
+    // O item151 não foi aplicado automaticamente
+    const [afterAutopilot] = await db
+      .select({ price: inventoryItems.price })
+      .from(inventoryItems)
+      .where(eq(inventoryItems.id, item151.id));
+    expect(afterAutopilot.price).toBe("200.00"); // preço original permaneceu inalterado
   });
 });

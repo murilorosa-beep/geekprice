@@ -71,6 +71,7 @@ export async function refreshRecommendations(organizationId: string) {
       currentPrice: item.currentPrice,
       maxChangePercent: 15,
       roundingMode: "ends_90" as const,
+      hasUnverifiedMarketReference: Boolean(item.hasUnverifiedReference),
     };
     const result = calculateRecommendation(parameters);
     const inputHash = createHash("sha256").update(JSON.stringify(parameters)).digest("hex");

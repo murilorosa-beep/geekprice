@@ -263,6 +263,7 @@ export function evaluateAutopilotItemChunk(
     marketPrice: number | null;
     desiredMarginPercent: number;
     stock: number;
+    hasUnverifiedReference?: boolean;
   }>,
   rules: PricingRuleRecord[],
   defaultPolicy: AutopilotPolicySettings,
@@ -306,6 +307,7 @@ export function evaluateAutopilotItemChunk(
       currentPrice: item.currentPrice,
       maxChangePercent,
       roundingMode,
+      hasUnverifiedMarketReference: Boolean(item.hasUnverifiedReference),
     });
 
     const itemView: AutopilotItemView = {

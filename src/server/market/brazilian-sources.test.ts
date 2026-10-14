@@ -3,6 +3,8 @@ import {
   fetchLigaPokemonQuotes,
   fetchLigaMagicQuotes,
   getBrazilianMarketQuotes,
+  signBrazilianQuote,
+  verifyBrazilianQuote,
 } from "./brazilian-sources";
 
 const mockLigaPokemonHtml = `
@@ -19,9 +21,9 @@ const mockLigaPokemonHtml = `
     <div class="price-max">R$ 40,00</div>
   </div>
   <div class="mtg-single">
-    <a href="/?view=cards/card&card=Pikachu+VMAX&ed=VIV&num=044">
-      <img data-src="//images.ligapokemon.com.br/cards/pikachu-vmax.jpg" />
-      <span>Pikachu VMAX</span>
+    <a href="/?view=cards/card&card=Pikachu&ed=VIV&num=044">
+      <img data-src="//images.ligapokemon.com.br/cards/pikachu-viv.jpg" />
+      <span>Pikachu</span>
     </a>
     <div class="price-min">R$ 80,00</div>
     <div class="price-avg">R$ 120,50</div>
@@ -34,18 +36,41 @@ const mockLigaPokemonHtml = `
 describe("brazilian-sources", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    delete process.env.FEATURE_BRL_SCRAPING_ENABLED;
   });
 
   describe("fetchLigaPokemonQuotes", () => {
-    it("extrai corretamente cotações, edição e número da Liga Pokémon", async () => {
+    it("permanece desabilitado por padrão na ausência da variável FEATURE_BRL_SCRAPING_ENABLED", async () => {
+      delete process.env.FEATURE_BRL_SCRAPING_ENABLED;
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const outcome = await fetchLigaPokemonQuotes("Pikachu");
+      expect(outcome.status).toBe("disabled_for_commercial");
+      expect(outcome.statusMessage).toContain("desabilitada para uso comercial");
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("respeita desabilitação comercial explícita via FEATURE_BRL_SCRAPING_ENABLED=false", async () => {
+      process.env.FEATURE_BRL_SCRAPING_ENABLED = "false";
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const outcome = await fetchLigaPokemonQuotes("Pikachu");
+      expect(outcome.status).toBe("disabled_for_commercial");
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("extrai corretamente cotações com tokens assinados pelo servidor quando habilitado", async () => {
+      process.env.FEATURE_BRL_SCRAPING_ENABLED = "true";
       vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
         new Response(mockLigaPokemonHtml, { status: 200 })
       );
 
-      const items = await fetchLigaPokemonQuotes("Pikachu");
-      expect(items.length).toBe(2);
+      const outcome = await fetchLigaPokemonQuotes("Pikachu");
+      expect(outcome.status).toBe("ok");
+      expect(outcome.items.length).toBe(2);
 
-      expect(items[0]).toMatchObject({
+      const first = outcome.items[0];
+      expect(first).toMatchObject({
         source: "ligapokemon",
         sourceLabel: "Liga Pokémon",
         cardTitle: "Pikachu",
@@ -56,85 +81,199 @@ describe("brazilian-sources", () => {
         priceMax: 40.0,
         currency: "BRL",
         url: "https://www.ligapokemon.com.br/?view=cards/card&card=Pikachu&ed=151&num=025",
-        imageUrl: "https://images.ligapokemon.com.br/cards/pikachu.jpg",
       });
-
-      expect(items[1]).toMatchObject({
-        source: "ligapokemon",
-        cardTitle: "Pikachu VMAX",
-        edition: "VIV",
-        collectorNumber: "044",
-        priceMin: 80.0,
-        priceAvg: 120.5,
-        priceMax: 150.0,
-      });
+      expect(first.token).toBeDefined();
+      expect(typeof first.token).toBe("string");
     });
 
-    it("retorna lista vazia com tolerância a falhas quando a requisição falhar", async () => {
-      vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Timeout ou rede indisponível"));
-
-      const items = await fetchLigaPokemonQuotes("Charizard");
-      expect(items).toEqual([]);
-    });
-
-    it("retorna lista vazia se resposta for HTTP 404/500", async () => {
+    it("diferencia bloqueio da fonte (HTTP 403 / 429) como source_blocked", async () => {
+      process.env.FEATURE_BRL_SCRAPING_ENABLED = "true";
       vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response("Erro interno", { status: 500 })
+        new Response("Cloudflare Turnstile", { status: 403 })
       );
 
-      const items = await fetchLigaPokemonQuotes("Mewtwo");
-      expect(items).toEqual([]);
+      const outcome = await fetchLigaPokemonQuotes("Charizard");
+      expect(outcome.status).toBe("source_blocked");
+      expect(outcome.httpStatus).toBe(403);
+      expect(outcome.items).toEqual([]);
+    });
+
+    it("diferencia falha de rede/timeout como network_error", async () => {
+      process.env.FEATURE_BRL_SCRAPING_ENABLED = "true";
+      const abortError = new Error("The operation was aborted");
+      abortError.name = "AbortError";
+      vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(abortError);
+
+      const outcome = await fetchLigaPokemonQuotes("Mewtwo");
+      expect(outcome.status).toBe("network_error");
+      expect(outcome.statusMessage).toContain("Tempo limite esgotado");
+      expect(outcome.items).toEqual([]);
+    });
+
+    it("diferencia alteração de layout HTML quando não encontra mtg-single em página grande", async () => {
+      process.env.FEATURE_BRL_SCRAPING_ENABLED = "true";
+      const alteredHtml = "<html><body><main>" + "Conteúdo sem singles ".repeat(200) + "</main></body></html>";
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(alteredHtml, { status: 200 })
+      );
+
+      const outcome = await fetchLigaPokemonQuotes("Gengar");
+      expect(outcome.status).toBe("html_layout_changed");
+      expect(outcome.statusMessage).toContain("alterado");
+      expect(outcome.items).toEqual([]);
+    });
+
+    it("diferencia ausência real de cotações quando a fonte informa zero resultados", async () => {
+      process.env.FEATURE_BRL_SCRAPING_ENABLED = "true";
+      const emptyHtml = "<html><body><div>Nenhum registro encontrado para esta busca</div></body></html>";
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(emptyHtml, { status: 200 })
+      );
+
+      const outcome = await fetchLigaPokemonQuotes("CartaInexistente12345");
+      expect(outcome.status).toBe("not_found");
+      expect(outcome.items).toEqual([]);
     });
   });
 
   describe("fetchLigaMagicQuotes", () => {
-    it("extrai cotações para Magic da Liga Magic", async () => {
+    it("extrai cotações para Magic da Liga Magic quando habilitado", async () => {
+      process.env.FEATURE_BRL_SCRAPING_ENABLED = "true";
       vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
         new Response(mockLigaPokemonHtml.replace(/ligapokemon/g, "ligamagic"), { status: 200 })
       );
 
-      const items = await fetchLigaMagicQuotes("Black Lotus");
-      expect(items.length).toBe(2);
-      expect(items[0].source).toBe("ligamagic");
-      expect(items[0].sourceLabel).toBe("Liga Magic");
+      const outcome = await fetchLigaMagicQuotes("Black Lotus");
+      expect(outcome.status).toBe("ok");
+      expect(outcome.items.length).toBe(2);
+      expect(outcome.items[0].source).toBe("ligamagic");
+      expect(outcome.items[0].sourceLabel).toBe("Liga Magic");
     });
   });
 
-  describe("getBrazilianMarketQuotes", () => {
-    it("calcula menor, média e maior preço consolidados em reais", async () => {
+  describe("Validação de Tokens e Prevenção de Falsificação", () => {
+    it("aceita cotação legítima com token gerado pelo servidor", () => {
+      const item = {
+        source: "ligapokemon" as const,
+        sourceLabel: "Liga Pokémon",
+        cardTitle: "Charizard",
+        edition: "151",
+        collectorNumber: "006",
+        priceMin: 200.0,
+        priceAvg: 250.0,
+        priceMax: 300.0,
+        currency: "BRL" as const,
+        url: "https://www.ligapokemon.com.br/?view=cards/card&card=Charizard&ed=151&num=006",
+        observedAt: new Date().toISOString(),
+      };
+
+      const token = signBrazilianQuote(item);
+      const verification = verifyBrazilianQuote(token, {
+        source: item.source,
+        cardTitle: item.cardTitle,
+        edition: item.edition,
+        collectorNumber: item.collectorNumber,
+        price: 250.0,
+        url: item.url,
+        observedAt: item.observedAt,
+      });
+
+      expect(verification).toEqual({ valid: true });
+    });
+
+    it("rejeita token ausente ou inválido", () => {
+      const verification = verifyBrazilianQuote("", {
+        source: "ligapokemon",
+        cardTitle: "Charizard",
+        price: 250.0,
+      });
+      expect(verification.valid).toBe(false);
+      expect(verification.reason).toContain("não fornecido");
+    });
+
+    it("rejeita token expirado", () => {
+      const expiredTimestamp = Date.now() - 60_000; // 1 minuto no passado
+      const expiredToken = `${expiredTimestamp}.abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890`;
+
+      const verification = verifyBrazilianQuote(expiredToken, {
+        source: "ligapokemon",
+        cardTitle: "Charizard",
+        price: 250.0,
+      });
+      expect(verification.valid).toBe(false);
+      expect(verification.reason).toContain("expirou");
+    });
+  });
+
+  describe("getBrazilianMarketQuotes - Estatísticas sem Misturar Edições", () => {
+    it("não mistura edições diferentes no cálculo de menor, mediana e maior preço", async () => {
+      process.env.FEATURE_BRL_SCRAPING_ENABLED = "true";
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(mockLigaPokemonHtml, { status: 200 })
+      );
+
+      // Busca sem especificar edição: o mock tem 1 carta na edição 151 (R$ 15,50 a 40) e 1 carta na VIV (R$ 80 a 150)
+      const result = await getBrazilianMarketQuotes({
+        cardName: "Pikachu",
+        game: "pokemon",
+        skipCache: true,
+      });
+
+      expect(result.status).toBe("ok");
+      expect(result.byEdition.length).toBe(2);
+
+      // Cada edição tem seu próprio cálculo isolado
+      const ed151 = result.byEdition.find((g) => g.edition === "151");
+      const edVIV = result.byEdition.find((g) => g.edition === "VIV");
+
+      expect(ed151).toBeDefined();
+      expect(ed151!.lowestPrice).toBe(15.5);
+      expect(ed151!.medianPrice).toBe(15.5);
+
+      expect(edVIV).toBeDefined();
+      expect(edVIV!.lowestPrice).toBe(80.0);
+      expect(edVIV!.medianPrice).toBe(80.0);
+
+      // A estatística do topo NÃO mistura 15,5 com 80
+      expect(result.statsScope).toBe("top_edition_match");
+      expect(result.lowestPrice).toBe(ed151!.lowestPrice);
+    });
+
+    it("isola estatísticas estritamente para a edição alvo quando especificada", async () => {
+      process.env.FEATURE_BRL_SCRAPING_ENABLED = "true";
       vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
         new Response(mockLigaPokemonHtml, { status: 200 })
       );
 
       const result = await getBrazilianMarketQuotes({
-        cardName: "Pikachu-consolidation-test",
+        cardName: "Pikachu",
+        edition: "VIV",
         game: "pokemon",
         skipCache: true,
       });
 
-      expect(result.totalFound).toBe(2);
-      expect(result.lowestPrice).toBe(15.5);
+      expect(result.statsScope).toBe("targeted_edition");
+      expect(result.lowestPrice).toBe(80.0);
       expect(result.highestPrice).toBe(80.0);
-      expect(result.medianPrice).toBe((15.5 + 80.0) / 2);
-      expect(result.items.length).toBe(2);
     });
 
-    it("utiliza cache em memória para a mesma busca", async () => {
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    it("identifica corretamente se o resultado veio do cache", async () => {
+      process.env.FEATURE_BRL_SCRAPING_ENABLED = "true";
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
         new Response(mockLigaPokemonHtml, { status: 200 })
       );
 
       const res1 = await getBrazilianMarketQuotes({
-        cardName: "CacheTestCard",
+        cardName: "CacheFlagTest",
         game: "pokemon",
       });
-      const res2 = await getBrazilianMarketQuotes({
-        cardName: "CacheTestCard",
-        game: "pokemon",
-      });
+      expect(res1.fromCache).toBe(false);
 
-      expect(res1.query).toBe(res2.query);
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const res2 = await getBrazilianMarketQuotes({
+        cardName: "CacheFlagTest",
+        game: "pokemon",
+      });
+      expect(res2.fromCache).toBe(true);
     });
   });
 });

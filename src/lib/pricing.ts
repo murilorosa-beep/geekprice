@@ -14,7 +14,8 @@ export type SafetyGate =
   | "missing_current_price"
   | "spike_threshold_exceeded"
   | "margin_below_minimum"
-  | "missing_market_reference";
+  | "missing_market_reference"
+  | "unverified_market_reference";
 
 export type PricingInput = {
   cost: number;
@@ -28,6 +29,7 @@ export type PricingInput = {
   minimumMarginPercent?: number;
   maxChangePercent?: number;
   roundingMode?: PriceRoundingMode;
+  hasUnverifiedMarketReference?: boolean;
 };
 
 export type PricingResult = {
@@ -173,6 +175,11 @@ export function calculateRecommendation(input: PricingInput): PricingResult {
     safetyStatus = "suspicious_flagged";
     safetyGate = "missing_cost";
     safetyFlag = "Informe o custo de aquisição do produto antes de usar uma sugestão de preço.";
+    safetyReason = safetyFlag;
+  } else if (input.hasUnverifiedMarketReference) {
+    safetyStatus = "suspicious_flagged";
+    safetyGate = "unverified_market_reference";
+    safetyFlag = "Referência externa não homologada: requer aprovação manual do lojista (ajuste automático bloqueado).";
     safetyReason = safetyFlag;
   } else if (currentPrice <= 0) {
     safetyStatus = "suspicious_flagged";

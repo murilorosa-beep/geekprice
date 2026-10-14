@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { authErrorResponse, requireOrganization } from "@/server/auth/context";
 import { getBrazilianMarketQuotes } from "@/server/market/brazilian-sources";
-import { persistBrazilianQuoteForInventoryItem } from "@/server/market/brazilian-service";
+import {
+  persistBrazilianQuoteForInventoryItem,
+  InvalidQuoteTokenError,
+  QuoteMismatchError,
+  ItemNotFoundError,
+} from "@/server/market/brazilian-service";
 
 const querySchema = z.object({
   cardName: z.string().min(1, "Nome da carta é obrigatório."),
@@ -23,6 +28,8 @@ const postSchema = z.object({
     edition: z.string().optional(),
     collectorNumber: z.string().optional(),
     cardTitle: z.string().optional(),
+    token: z.string().min(1, "Token de assinatura de cotação obrigatório."),
+    observedAt: z.string().optional(),
   }),
 });
 
@@ -66,6 +73,15 @@ export async function POST(request: Request) {
 
     return Response.json(result);
   } catch (error) {
+    if (error instanceof InvalidQuoteTokenError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
+    if (error instanceof QuoteMismatchError) {
+      return Response.json({ error: error.message, code: error.code }, { status: 422 });
+    }
+    if (error instanceof ItemNotFoundError) {
+      return Response.json({ error: error.message }, { status: 404 });
+    }
     return authErrorResponse(error);
   }
 }
