@@ -1524,3 +1524,81 @@ th{font-size:11px;padding:13px 18px}td{font-size:13px;padding:14px 18px}.product
 .seller-review-actions a { display:inline-flex;align-items:center;text-decoration:none; }
 @media (max-width:768px) { .product-onboarding { grid-template-columns:1fr; } .product-detail-hero { align-items:flex-start; } .market-stats { grid-template-columns:repeat(2,minmax(0,1fr)); } .market-guide-summary { flex-wrap:wrap; } }
 @media (max-width:768px) { .seller-steps { grid-template-columns:1fr; } .seller-queue table,.seller-queue tbody,.seller-queue tr,.seller-queue td { display:block;min-width:0;width:100%; } .seller-queue thead { display:none; } .seller-queue tr { padding:12px;border-bottom:1px solid var(--line); } .seller-queue td { border:0;padding:7px 10px; } .seller-queue td:first-child { display:inline-block;width:auto; } .seller-queue td:last-child { text-align:left!important; } .seller-review-heading { align-items:flex-start; } .seller-review-actions>* { flex:1 1 100%;justify-content:center; } }
+
+/* GeekPrice premium workspace theme: collector character, SaaS clarity. */
+:root {
+  color-scheme: dark;
+  --bg: #0b1020;
+  --panel: #131b2e;
+  --ink: #edf2ff;
+  --muted: #9aa8c2;
+  --line: #26334d;
+  --violet: #a895ff;
+  --violet-dark: #806bf0;
+  --green: #54d6a1;
+  --amber: #e8bd68;
+  --red: #ff7989;
+}
+html,body { background:#0b1020;color:var(--ink); }
+body { background:radial-gradient(ellipse at 72% -18%,#202b53 0,transparent 42%),#0b1020; }
+::selection { color:#fff;background:#7359df99; }
+a { color:var(--violet); }
+.app-shell { background:transparent; }
+.sidebar { background:linear-gradient(180deg,#111a2d 0%,#0e1526 100%);border-right:1px solid #26334d;box-shadow:12px 0 40px #05091455; }
+.sidebar a,.sidebar button { color:#aebbd2; }
+.sidebar a:hover,.sidebar button:hover { color:#f3f5ff;background:#1b2740; }
+.sidebar a.active,.sidebar .active { color:#fff;background:linear-gradient(100deg,#6550c333,#a895ff12);border-color:#a895ff66; }
+main { background:transparent; }
+.topbar { background:#0c1323eF;border-bottom-color:#26334d;backdrop-filter:blur(16px); }
+.page-topbar { color:#f0f3ff; }
+.page-content,.content { color:var(--ink); }
+.page-content { background:transparent; }
+.page-title h1,.page-content h1,.page-content h2,.page-content h3 { color:#f2f5ff; }
+.page-title p,.page-content p,.page-content small { color:var(--muted); }
+.panel,.metric,.modal-card,.import-modal,.login-card,.state-card,.legal-card,.seller-steps>div,.market-my-card,.catalog-card,.billing-plan,.team-panel,.team-invite-form,.plan-admin-form {
+  color:var(--ink);background:linear-gradient(155deg,#151f34 0%,#111a2d 100%);border:1px solid #293752;box-shadow:0 10px 30px #05091438;
+}
+.panel,.metric,.catalog-card,.billing-plan { border-radius:14px; }
+.panel-title { border-bottom-color:#293752; }
+.panel-title h2,.panel-title strong,.metric strong,.product-cell strong,.seller-steps strong { color:#eff3ff; }
+.panel-title p,.metric p,.metric span,.product-cell span { color:#9aa8c2; }
+.panel-title select,.team-row select,.filters input,.filters select,.field input,.field select,.link-fields select,.catalog-search-form input,.login-card input,.global-search,.global-search kbd {
+  color:#edf2ff;background:#0c1425;border-color:#2d3a55;
+}
+input::placeholder,textarea::placeholder { color:#8290aa;opacity:1; }
+.global-search input { color:#edf2ff; }
+th { background:#10192b;color:#98a7c2; }
+td { color:#b7c4da;border-top-color:#27344d; }
+td>strong { color:#edf2ff; }
+.pagination { border-top-color:#293752;color:var(--muted); }
+.pagination button,.secondary,.page-content button:not(.primary):not(.danger):not(.row-action) { color:#dce5f7;background:#172239;border-color:#34425e; }
+.primary,.catalog-search-button { color:#fff;background:linear-gradient(110deg,#7258e6,#8d77f4);box-shadow:0 5px 16px #7258e633; }
+.primary:hover,.catalog-search-button:hover { background:linear-gradient(110deg,#8068f1,#9b87ff); }
+.metric-icon.violet { color:#c3b8ff;background:#30285a; }
+.metric-icon.amber { color:#f0cf8b;background:#40331e; }
+.metric-icon.red { color:#ff9ba7;background:#482634; }
+.metric-icon.green { color:#70e2b4;background:#173d37; }
+.status.attention,.draft-notice,.seller-review-warning { color:#f1ce8a;background:#332b1e;border-color:#665331; }
+.status.opportunity,.status-active { color:#74dfb3;background:#173b35; }
+.status.healthy,.status-pill,.role-badge { color:#c3b8ff;background:#29264a; }
+.form-error { color:#ff9ba7;background:#452632; }
+.login-page,.state-page,.legal-page { background:radial-gradient(ellipse at 50% 0,#242b55 0,transparent 44%),#0b1020; }
+.login-card,.state-card,.legal-card { border-color:#303c59; }
+.login-card label,.field,.catalog-search-form label { color:#c3cde0; }
+.login-card input:focus,.filters input:focus,.filters select:focus,.field input:focus,.field select:focus,.catalog-search-form input:focus { border-color:#a895ff;box-shadow:0 0 0 3px #a895ff20; }
+.file-drop,.preview-summary,.seller-review-prices>div { background:#101a2d;border-color:#33415e;color:#c6d1e4; }
+.file-drop strong,.seller-review-prices strong,.seller-review-facts strong { color:#edf2ff; }
+.preview-summary span,.seller-review-prices span,.seller-review-facts span { color:#9aa8c2; }
+.seller-review-reason,.autopilot-help { color:#e8d8aa;background:#29271f;border-color:#5b4d30; }
+.seller-steps>div>span { color:#d0c5ff;background:#30285a; }
+.seller-steps a,.autopilot-help a,.catalog-card-action,.auth-links a,.auth-switch a { color:#b5a8ff!important; }
+.market-selected-art,.product-thumb { box-shadow:0 8px 24px #05091466; }
+.catalog-card-image,.product-detail-hero,.market-guide-summary { border-color:#2c3953; }
+.usage-track { background:#26334d; }
+.usage-track i { background:linear-gradient(90deg,#806bf0,#bd9dff); }
+.billing-plan ul,.legal-card p { color:#afbdd3; }
+:focus-visible { outline:2px solid #b3a5ff;outline-offset:3px; }
+@media(max-width:760px) {
+  .sidebar { box-shadow:18px 0 50px #050914aa; }
+  .page-content { padding-top:23px; }
+}
