@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { writeFile } from "node:fs/promises";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../src/db";
 import {
   memberships,
@@ -11,6 +11,7 @@ import {
   users,
 } from "../src/db/schema";
 import { hashPassword } from "../src/server/auth/password";
+import { ensureMasterAdminOrganizationOwner } from "../src/server/admin/master-admin-membership";
 
 async function main() {
   const adminEmail = (process.env.ADMIN_EMAIL || "admin@geekprice.com.br").trim().toLowerCase();
@@ -129,17 +130,26 @@ async function main() {
       console.log(`[OK] Usuário ${adminEmail} provisionado.`);
     }
 
-    // 6. Garantir permissão owner
-    const [membership] = await tx.select().from(memberships).where(eq(memberships.userId, userMaster.id)).limit(1);
-    if (!membership) {
-      await tx.insert(memberships).values({
-        organizationId: org.id,
-        userId: userMaster.id,
-        role: "owner",
-      });
-    } else if (membership.role !== "owner") {
-      await tx.update(memberships).set({ role: "owner" }).where(eq(memberships.userId, userMaster.id));
-    }
+    // 6. Garantir owner exclusivamente na organização administrativa.
+    // Memberships do mesmo usuário em lojas de clientes nunca são alterados.
+    await ensureMasterAdminOrganizationOwner({
+      async findByUserAndOrganization(userId, organizationId) {
+        const [membership] = await tx.select({ role: memberships.role }).from(memberships).where(and(
+          eq(memberships.userId, userId),
+          eq(memberships.organizationId, organizationId),
+        )).limit(1);
+        return membership;
+      },
+      async createOwner(userId, organizationId) {
+        await tx.insert(memberships).values({ organizationId, userId, role: "owner" });
+      },
+      async promoteToOwner(userId, organizationId) {
+        await tx.update(memberships).set({ role: "owner" }).where(and(
+          eq(memberships.userId, userId),
+          eq(memberships.organizationId, organizationId),
+        ));
+      },
+    }, userMaster.id, org.id);
 
     // 7. Desativar qualquer conta de teste residual (garantir conta única de admin conforme solicitado)
     const [testUser] = await tx.select().from(users).where(eq(users.email, "admin@teste.com")).limit(1);

@@ -7,6 +7,9 @@ const target = new URL(env.DATABASE_URL);
 if (!/^geekprice_phase81_test_\d+$/.test(env.PHASE81_TEST_DATABASE) || target.pathname !== "/" + env.PHASE81_TEST_DATABASE) {
   throw new Error("Validation server requires the isolated test database");
 }
+// This diagnostic is opt-in and this launcher is only used after the isolated
+// database name has been validated above.
+env.E2E_RUNTIME_DIAGNOSTIC = "true";
 if (process.argv.includes("--trusted-proxy")) {
   env.TRUSTED_PROXY_HOPS = "1";
   env.NEXTAUTH_URL = "http://127.0.0.1:3130";

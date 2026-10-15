@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-export type BrazilianQuoteSource = "ligapokemon" | "ligamagic" | "nacional_referencia";
+export type BrazilianQuoteSource = "mypcards" | "ligapokemon" | "ligamagic" | "nacional_referencia";
 
 export type BrazilianQuoteItem = {
   source: BrazilianQuoteSource;
@@ -26,7 +26,10 @@ export type BrazilianQuoteStatus =
   | "network_error"
   | "source_blocked"
   | "html_layout_changed"
-  | "disabled_for_commercial";
+  | "disabled_for_commercial"
+  | "access_pending"
+  | "rate_limited"
+  | "invalid_token";
 
 export type BrazilianQuoteEditionGroup = {
   edition: string;
@@ -279,6 +282,106 @@ function parseBrlMoney(raw?: string | null): number {
 
 export function isBrlScrapingEnabled(): boolean {
   return process.env.FEATURE_BRL_SCRAPING_ENABLED === "true";
+}
+
+type MypCard = {
+  internal_code?: number;
+  card_code?: string;
+  name_pt?: string | null;
+  name_en?: string | null;
+  edition_pt?: string | null;
+  edition_en?: string | null;
+  edition_code?: string | null;
+  min_price?: string | null;
+  avg_price?: string | null;
+  max_price?: string | null;
+  available_quantity?: number | null;
+  img_pt?: string | null;
+  img_en?: string | null;
+  link?: string | null;
+};
+
+function decimalPrice(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+/**
+ * Conector oficial do MYP Cards. O contrato vem do OpenAPI público:
+ * GET /{jogo}/carta/{nome}, com preços BRL e X-Api-Token.
+ * Não há scraping e o token nunca chega ao navegador.
+ */
+export async function fetchMypCardsQuotes(
+  cardName: string,
+  game: "pokemon" | "magic",
+  edition?: string,
+  collectorNumber?: string,
+): Promise<FetchQuotesOutcome> {
+  const now = new Date().toISOString();
+  const token = process.env.MYP_CARDS_API_TOKEN?.trim();
+  if (!token) {
+    return {
+      status: "access_pending",
+      statusMessage: "A API oficial MYP Cards está preparada, mas requer um token aprovado. Solicite acesso ao responsável e configure MYP_CARDS_API_TOKEN no ambiente do servidor.",
+      items: [], observedAt: now,
+    };
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+  try {
+    const url = `https://mypcards.com/api/v1/${game}/carta/${encodeURIComponent(cardName.trim())}`;
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { "X-Api-Token": token, Accept: "application/json" },
+    });
+    if (response.status === 401 || response.status === 403) {
+      return { status: "invalid_token", statusMessage: "O acesso da API MYP Cards foi recusado. Verifique aprovação e token no ambiente do servidor.", items: [], httpStatus: response.status, observedAt: now };
+    }
+    if (response.status === 429) {
+      return { status: "rate_limited", statusMessage: "A API MYP Cards atingiu o limite de requisições. Aguarde antes de consultar novamente.", items: [], httpStatus: 429, observedAt: now };
+    }
+    if (!response.ok) {
+      return { status: "network_error", statusMessage: `A API MYP Cards respondeu HTTP ${response.status}.`, items: [], httpStatus: response.status, observedAt: now };
+    }
+    const body = await response.json() as { cards?: MypCard[] };
+    const requestedEdition = edition?.trim().toLowerCase();
+    const requestedNumber = collectorNumber?.trim().toLowerCase();
+    const cards = (body.cards ?? []).filter((card) => {
+      const editions = [card.edition_pt, card.edition_en, card.edition_code].filter(Boolean).map((value) => value!.toLowerCase());
+      if (requestedEdition && !editions.some((value) => value === requestedEdition)) return false;
+      // A especificação não declara um campo de número do colecionador. Nunca inferimos
+      // esse valor de card_code; quando foi informado, a escolha permanece manual.
+      if (requestedNumber) return false;
+      return true;
+    });
+    const items = cards.flatMap((card): BrazilianQuoteItem[] => {
+      const min = decimalPrice(card.min_price);
+      const avg = decimalPrice(card.avg_price);
+      const max = decimalPrice(card.max_price);
+      const reference = avg ?? min ?? max;
+      if (!reference || !card.card_code) return [];
+      const raw: Omit<BrazilianQuoteItem, "token"> = {
+        source: "mypcards", sourceLabel: "MYP Cards", cardTitle: card.name_pt || card.name_en || cardName,
+        edition: card.edition_pt || card.edition_en || card.edition_code || undefined,
+        priceMin: min ?? reference, priceAvg: avg ?? reference, priceMax: max ?? reference,
+        currency: "BRL", url: card.link || `https://mypcards.com/`, imageUrl: card.img_pt || card.img_en || undefined, observedAt: now,
+      };
+      return [{ ...raw, token: signBrazilianQuote(raw) }];
+    });
+    if (requestedNumber) {
+      return { status: "not_found", statusMessage: "A API MYP Cards não documenta número de colecionador na resposta de busca. Escolha uma carta pelo catálogo e vincule-a manualmente para não misturar variantes.", items: [], observedAt: now };
+    }
+    return items.length
+      ? { status: "ok", statusMessage: `${items.length} referência(s) BRL retornada(s) pela API MYP Cards. Preços representam ofertas disponíveis, não vendas concluídas.`, items, observedAt: now }
+      : { status: "not_found", statusMessage: "A API MYP Cards não retornou referência compatível para esta carta/edição.", items: [], observedAt: now };
+  } catch (error) {
+    const timeout = (error as { name?: string })?.name === "AbortError";
+    return { status: "network_error", statusMessage: timeout ? "Tempo limite ao consultar a API MYP Cards." : "Falha de rede ao consultar a API MYP Cards.", items: [], observedAt: now };
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 /**
@@ -732,13 +835,7 @@ export async function getBrazilianMarketQuotes(params: {
     }
   }
 
-  let outcome: FetchQuotesOutcome;
-
-  if (game === "pokemon") {
-    outcome = await fetchLigaPokemonQuotes(params.cardName, params.edition, params.collectorNumber);
-  } else {
-    outcome = await fetchLigaMagicQuotes(params.cardName, params.edition, params.collectorNumber);
-  }
+  const outcome = await fetchMypCardsQuotes(params.cardName, game, params.edition, params.collectorNumber);
 
   const items = outcome.items;
 
@@ -795,9 +892,7 @@ export async function getBrazilianMarketQuotes(params: {
     statsScope = "top_edition_match";
   }
 
-  const commercialNotice = !isBrlScrapingEnabled()
-    ? "Coleta externa pública desabilitada por padrão para conformidade comercial. Utilize importação de cotações homologadas ou habilite FEATURE_BRL_SCRAPING_ENABLED=true sob autorização."
-    : "Aviso: Referência extraída de anúncios públicos (não homologada oficialmente). Requer conferência manual.";
+  const commercialNotice = "MYP Cards exige atribuição visível e token aprovado. Os valores são ofertas disponíveis em BRL, não vendas concluídas; toda alteração de preço continua sujeita a aprovação manual.";
 
   const result: BrazilianQuoteResult = {
     query: params.cardName,

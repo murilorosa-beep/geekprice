@@ -185,7 +185,7 @@ export function BrazilianQuoteModal({
           Cotações Brasileiras: {cardName}
         </h2>
         <p style={{ margin: "0 0 16px 0", fontSize: "0.85rem", color: "var(--muted-foreground)" }}>
-          Consulta de ofertas em plataformas nacionais de referência (como Liga Pokémon). Referências de anúncios públicos requerem validação e aprovação manual antes de aplicação em vendas.
+          Referências em BRL da API MYP Cards, quando configurada. Valores são ofertas disponíveis e qualquer sugestão continua exigindo aprovação manual.
         </p>
 
         {/* Barra de Filtros / Ajuste de Busca */}
@@ -361,13 +361,13 @@ export function BrazilianQuoteModal({
               background:
                 data.status === "source_blocked"
                   ? "rgba(239, 68, 68, 0.08)"
-                  : data.status === "disabled_for_commercial"
+                  : data.status === "disabled_for_commercial" || data.status === "access_pending" || data.status === "invalid_token"
                     ? "rgba(99, 102, 241, 0.08)"
                     : "rgba(245, 158, 11, 0.08)",
               border:
                 data.status === "source_blocked"
                   ? "1px solid rgba(239, 68, 68, 0.3)"
-                  : data.status === "disabled_for_commercial"
+                  : data.status === "disabled_for_commercial" || data.status === "access_pending" || data.status === "invalid_token"
                     ? "1px solid rgba(99, 102, 241, 0.3)"
                     : "1px solid rgba(245, 158, 11, 0.3)",
             }}
@@ -393,16 +393,20 @@ export function BrazilianQuoteModal({
                     ? "Falha de comunicação de rede"
                     : data.status === "html_layout_changed"
                       ? "Formato da página externa alterado"
-                      : data.status === "disabled_for_commercial"
-                        ? "Coleta desabilitada para uso comercial"
+                  : data.status === "disabled_for_commercial" || data.status === "access_pending"
+                    ? "Acesso à fonte pendente"
+                    : data.status === "invalid_token"
+                      ? "Credencial da fonte recusada"
+                      : data.status === "rate_limited"
+                        ? "Limite da fonte atingido"
                         : "Nenhuma cotação localizada"}
               </strong>
               <p style={{ margin: "4px 0 0 0", fontSize: "0.83rem", color: "var(--muted-foreground)" }}>
                 {data.statusMessage}
               </p>
-              {data.status === "disabled_for_commercial" && (
+              {data.status === "access_pending" && (
                 <p style={{ margin: "8px 0 0 0", fontSize: "0.8rem", color: "#a5b4fc" }}>
-                  💡 Para atualizar cotações no Brasil com conformidade legal, utilize o botão <strong>Importar Planilha BRL</strong> na tela de Mercado.
+                  💡 Enquanto o acesso à API aguarda aprovação, você ainda pode registrar referências próprias pelo <strong>CSV BRL</strong>, sempre identificadas como fonte privada e com aprovação manual.
                 </p>
               )}
             </div>

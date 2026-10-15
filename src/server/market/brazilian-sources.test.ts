@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import {
   fetchLigaPokemonQuotes,
   fetchLigaMagicQuotes,
+  fetchMypCardsQuotes,
   getBrazilianMarketQuotes,
   signBrazilianQuote,
   verifyBrazilianQuote,
@@ -33,10 +34,16 @@ const mockLigaPokemonHtml = `
 </html>
 `;
 
+const mockMypCardsResponse = JSON.stringify({ cards: [
+  { card_code: "MEW-025", name_pt: "Pikachu", edition_pt: "151", min_price: "15.50", avg_price: "25.00", max_price: "40.00", link: "https://mypcards.com/pokemon/1" },
+  { card_code: "VIV-044", name_pt: "Pikachu", edition_pt: "VIV", min_price: "80.00", avg_price: "120.50", max_price: "150.00", link: "https://mypcards.com/pokemon/2" },
+] });
+
 describe("brazilian-sources", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     delete process.env.FEATURE_BRL_SCRAPING_ENABLED;
+    delete process.env.MYP_CARDS_API_TOKEN;
   });
 
   describe("fetchLigaPokemonQuotes", () => {
@@ -136,6 +143,38 @@ describe("brazilian-sources", () => {
     });
   });
 
+  describe("fetchMypCardsQuotes", () => {
+    it("não chama rede quando o token aprovado não foi configurado", async () => {
+      delete process.env.MYP_CARDS_API_TOKEN;
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      const outcome = await fetchMypCardsQuotes("Charizard ex", "pokemon");
+      expect(outcome.status).toBe("access_pending");
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("consome o contrato documentado da busca MYP, atribui a fonte e assina a referência", async () => {
+      process.env.MYP_CARDS_API_TOKEN = "fixture-token";
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({ cards: [{
+        internal_code: 123, card_code: "SV3-006", name_pt: "Charizard ex", edition_pt: "Ruler of the Black Flame",
+        edition_code: "SV3", min_price: "120.00", avg_price: "145.50", max_price: "180.00",
+        available_quantity: 4, link: "https://mypcards.com/pokemon/produto/123/charizard-ex",
+      }] }), { status: 200, headers: { "content-type": "application/json" } }));
+      const outcome = await fetchMypCardsQuotes("Charizard ex", "pokemon", "Ruler of the Black Flame");
+      expect(outcome.status).toBe("ok");
+      expect(outcome.items[0]).toMatchObject({ source: "mypcards", sourceLabel: "MYP Cards", cardTitle: "Charizard ex", priceMin: 120, priceAvg: 145.5, priceMax: 180, currency: "BRL" });
+      expect(outcome.items[0]?.token).toEqual(expect.any(String));
+      expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining("/pokemon/carta/Charizard%20ex"), expect.objectContaining({ headers: expect.objectContaining({ "X-Api-Token": "fixture-token" }) }));
+    });
+
+    it("não inventa número de colecionador quando a API não o documenta", async () => {
+      process.env.MYP_CARDS_API_TOKEN = "fixture-token";
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({ cards: [] }), { status: 200 }));
+      const outcome = await fetchMypCardsQuotes("Charizard ex", "pokemon", "SV3", "006");
+      expect(outcome.status).toBe("not_found");
+      expect(outcome.statusMessage).toContain("não documenta número de colecionador");
+    });
+  });
+
   describe("fetchLigaMagicQuotes", () => {
     it("extrai cotações para Magic da Liga Magic quando habilitado", async () => {
       process.env.FEATURE_BRL_SCRAPING_ENABLED = "true";
@@ -207,9 +246,9 @@ describe("brazilian-sources", () => {
 
   describe("getBrazilianMarketQuotes - Estatísticas sem Misturar Edições", () => {
     it("não mistura edições diferentes no cálculo de menor, mediana e maior preço", async () => {
-      process.env.FEATURE_BRL_SCRAPING_ENABLED = "true";
+      process.env.MYP_CARDS_API_TOKEN = "fixture-token";
       vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response(mockLigaPokemonHtml, { status: 200 })
+        new Response(mockMypCardsResponse, { status: 200 })
       );
 
       // Busca sem especificar edição: o mock tem 1 carta na edição 151 (R$ 15,50 a 40) e 1 carta na VIV (R$ 80 a 150)
@@ -240,9 +279,9 @@ describe("brazilian-sources", () => {
     });
 
     it("isola estatísticas estritamente para a edição alvo quando especificada", async () => {
-      process.env.FEATURE_BRL_SCRAPING_ENABLED = "true";
+      process.env.MYP_CARDS_API_TOKEN = "fixture-token";
       vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response(mockLigaPokemonHtml, { status: 200 })
+        new Response(mockMypCardsResponse, { status: 200 })
       );
 
       const result = await getBrazilianMarketQuotes({
@@ -258,9 +297,9 @@ describe("brazilian-sources", () => {
     });
 
     it("identifica corretamente se o resultado veio do cache", async () => {
-      process.env.FEATURE_BRL_SCRAPING_ENABLED = "true";
+      process.env.MYP_CARDS_API_TOKEN = "fixture-token";
       vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        new Response(mockLigaPokemonHtml, { status: 200 })
+        new Response(mockMypCardsResponse, { status: 200 })
       );
 
       const res1 = await getBrazilianMarketQuotes({

@@ -88,6 +88,12 @@ describe("brazilian-service - Validações e Integridade Financeira", () => {
       }
     });
 
+    it("bloqueia referência sem número quando o estoque possui número de colecionador", () => {
+      expect(() => validateQuoteInventoryMatch(validItem, {
+        cardTitle: "Charizard", edition: "151",
+      })).toThrowError(QuoteMismatchError);
+    });
+
     it("bloqueia variantes especiais de carta incompatíveis (ex: Charizard normal vs Charizard VMAX)", () => {
       try {
         validateQuoteInventoryMatch(validItem, {

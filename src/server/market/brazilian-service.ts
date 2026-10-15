@@ -135,6 +135,12 @@ export function validateQuoteInventoryMatch(
       `Divergência de numeração: o produto no estoque é o nº ${item.collectorNumber}, mas a cotação selecionada refere-se ao nº ${quote.collectorNumber}.`
     );
   }
+  if (normItemNum && !normQuoteNum) {
+    throw new QuoteMismatchError(
+      "AMBIGUOUS_MATCH",
+      `A cotação não informa o número de colecionador, mas o estoque está registrado como nº ${item.collectorNumber}. Selecione uma variante identificada para evitar associação ambígua.`
+    );
+  }
 }
 
 export async function persistBrazilianQuoteForInventoryItem(
@@ -162,8 +168,9 @@ export async function persistBrazilianQuoteForInventoryItem(
     );
   }
 
+  const normalizedSourceLabel = quote.sourceLabel.toLowerCase();
   const tokenVerification = verifyBrazilianQuote(quote.token, {
-    source: quote.sourceLabel.toLowerCase().includes("magic") ? "ligamagic" : "ligapokemon",
+    source: normalizedSourceLabel.includes("myp") ? "mypcards" : normalizedSourceLabel.includes("magic") ? "ligamagic" : "ligapokemon",
     cardTitle: quote.cardTitle || "",
     edition: quote.edition,
     collectorNumber: quote.collectorNumber,

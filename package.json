@@ -11,11 +11,12 @@
     "test": "vitest run",
     "test:auth": "tsx --env-file=.env scripts/verify-auth-flow.ts",
     "test:watch": "vitest",
-    "test:integration": "node --env-file=.env --env-file=.env.phase81 node_modules/vitest/vitest.mjs run --config vitest.integration.config.ts",
+    "test:integration": "node --env-file=.env --env-file=.env.phase81 scripts/assert-isolated-test-environment.mjs && node --env-file=.env --env-file=.env.phase81 node_modules/vitest/vitest.mjs run --config vitest.integration.config.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "db:inspect": "node --env-file=.env scripts/inspect-validation-environment.mjs",
+    "admin:inspect-security": "node --env-file=.env scripts/inspect-admin-security.mjs",
     "db:backup": "node --env-file=.env scripts/backup-postgres.mjs",
     "db:seed": "tsx --env-file=.env scripts/seed.ts",
     "db:repair-admin": "tsx --env-file=.env scripts/repair-local-admin-password.ts",
@@ -23,7 +24,8 @@
     "worker:autopilot:once": "tsx --env-file=.env scripts/run-autopilot-worker.ts --once",
     "db:check": "tsx scripts/verify-migration-snapshots.ts",
     "admin:create": "tsx --env-file=.env scripts/create-master-admin.ts",
-    "admin:rotate": "tsx --env-file=.env scripts/rotate-admin-password.ts"
+    "admin:rotate": "tsx --env-file=.env scripts/rotate-admin-password.ts",
+    "admin:create-murilo": "tsx --env-file=.env scripts/create-admin-murilo.ts"
   },
   "dependencies": {
     "@next/env": "^16.4.0",

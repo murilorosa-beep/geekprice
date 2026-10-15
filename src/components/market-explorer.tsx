@@ -494,17 +494,21 @@ export function MarketExplorer({ canManage }: { canManage: boolean }) {
                   ? "Mercado brasileiro (BRL)"
                   : "Referência internacional (não representa preço direto praticado no Brasil)"}
                 {" · "}
-                {g.sourceVerified
-                  ? "Fonte verificada"
-                  : g.sourceType === "private"
-                  ? "Fonte privada não verificada"
-                  : "Fonte não verificada"}
+                <span data-testid="market-source-status">
+                  {g.sourceVerified
+                    ? "Fonte verificada"
+                    : g.sourceType === "private"
+                    ? "Fonte privada não verificada"
+                    : "Fonte não verificada"}
+                </span>
                 {" · "}
-                {g.priceType === "completed_sale"
-                  ? "Venda informada"
-                  : g.priceType === "listing"
-                  ? "Preço anunciado"
-                  : "Referência informada"}
+                <span data-testid="market-price-type">
+                  {g.priceType === "completed_sale"
+                    ? "Venda informada"
+                    : g.priceType === "listing"
+                    ? "Preço anunciado"
+                    : "Referência informada"}
+                </span>
                 {" · "}
                 {g.count} observação(ões) · {new Date(g.lastUpdated).toLocaleString("pt-BR")}
               </p>

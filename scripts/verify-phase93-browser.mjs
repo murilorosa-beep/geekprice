@@ -18,6 +18,13 @@ if (!/^geekprice_phase81_test_\d+$/.test(env.PHASE81_TEST_DATABASE) || target.pa
 const origin = "http://127.0.0.1:3108";
 const runId = Date.now().toString();
 
+const runtimeDiagnostic = await fetch(`${origin}/api/internal/test-runtime-db`);
+const runtimeTarget = await runtimeDiagnostic.json();
+if (!runtimeDiagnostic.ok || runtimeTarget.isolated !== true || runtimeTarget.database !== env.PHASE81_TEST_DATABASE) {
+  throw new Error("O runtime Next não comprovou conexão com o banco isolado; E2E interrompido antes de criar dados.");
+}
+console.log(`[Phase 9.3 Browser] Runtime confirmado: ${runtimeTarget.host}:${runtimeTarget.port}/${runtimeTarget.database}`);
+
 console.log(`[Phase 9.3 Browser] Iniciando jornada de 20 passos em ${origin}`);
 console.log(`[Phase 9.3 Browser] Banco ativo: ${env.PHASE81_TEST_DATABASE}`);
 
@@ -29,6 +36,8 @@ import { hashPassword } from "../src/server/auth/password.ts";
 const testEmail = `lojista-fase93-${runId}@teste.invalid`;
 const testPassword = `MvpSenhaFase93!@#${runId.slice(-4)}`;
 const testOrgName = `Loja Piloto Geek F93 (${runId.slice(-4)})`;
+const foreignEmail = `isolamento-fase93-${runId}@teste.invalid`;
+const foreignPassword = `IsolamentoFase93!@#${runId.slice(-4)}`;
 
 const [testOrg] = await db.insert(organizations).values({
   name: testOrgName,
@@ -49,6 +58,19 @@ await db.insert(memberships).values({
   userId: testUser.id,
   role: "owner",
 });
+
+const [foreignOrg] = await db.insert(organizations).values({
+  name: `Loja Isolada Geek F93 (${runId.slice(-4)})`,
+  slug: `loja-isolada-f93-${runId}`,
+  onboardingCompletedAt: new Date(),
+}).returning();
+const [foreignUser] = await db.insert(users).values({
+  name: "Lojista de isolamento Fase 93",
+  email: foreignEmail,
+  passwordHash: await hashPassword(foreignPassword),
+  emailVerifiedAt: new Date(),
+}).returning();
+await db.insert(memberships).values({ organizationId: foreignOrg.id, userId: foreignUser.id, role: "owner" });
 
 console.log(`[Phase 9.3 Browser] Usuário de teste criado: ${testEmail}`);
 
@@ -242,6 +264,8 @@ ${csvSleeveName},Acessórios,CSV-SLV-${runId.slice(-4)},Geral,003,20.00,45.00,20
   // PASSO 11: Importar referências de mercado em BRL
   console.log("-> Passo 11: Importar referências de mercado em BRL");
   await page.goto(`${origin}/market`);
+  await page.getByRole("tab", { name: "Buscar edição no catálogo" }).click();
+  await page.getByLabel("Arquivo CSV BRL", { exact: true }).waitFor();
   const brlCsv = `produto,idioma,condicao,acabamento,fonte,tipo_preco,moeda,valor,data_referencia
 ${csvDeckboxName},pt-BR,new,standard,REFERENCIA PRIVADA F93,reference,BRL,75.00,${new Date().toISOString()}
 ${csvDeckboxName},pt-BR,new,standard,REFERENCIA PRIVADA F93,reference,BRL,78.00,${new Date(Date.now() - 86400000).toISOString()}
@@ -258,13 +282,30 @@ ${csvSleeveName},pt-BR,new,standard,REFERENCIA PRIVADA F93,reference,BRL,52.00,$
   await brlButton.click();
   assert.equal((await brlCommit).status(), 201, "BRL Partner import commit returned 201");
   await page.getByText(/cotação\(ões\) BRL registrada/).waitFor();
-  results.push("Passo 11: Cotações privadas BRL importadas com sucesso");
+  const persistedMarket = await page.request.get(`${origin}/api/market?currency=BRL&days=30`);
+  assert.equal(persistedMarket.status(), 200, "Consulta posterior de mercado retornou 200");
+  const persistedMarketBody = await persistedMarket.json();
+  const importedReference = persistedMarketBody.groups?.find((group) =>
+    group.source === "REFERENCIA PRIVADA F93"
+    && group.productName === csvDeckboxName
+    && group.currency === "BRL"
+  );
+  assert.ok(importedReference, "A consulta posterior recuperou a referência BRL da organização autenticada");
+  assert.equal(importedReference.sourceType, "private", "O tipo privado foi preservado");
+  assert.equal(importedReference.sourceVerified, false, "A fonte privada permanece não homologada");
+  assert.equal(importedReference.priceType, "reference", "O tipo de preço reference foi preservado");
+  assert.equal(importedReference.count, 2, "As duas observações da Deck Box foram persistidas");
+  assert.equal(importedReference.min, 75, "O menor valor recuperado corresponde ao CSV");
+  assert.equal(importedReference.max, 78, "O maior valor recuperado corresponde ao CSV");
+  results.push("Passo 11: Cotações privadas BRL importadas e recuperadas pela API da organização");
 
   // PASSO 12: Verificar a origem e a data das referências
   console.log("-> Passo 12: Verificar origem e tipo das referências de mercado");
   await page.goto(`${origin}/market`);
-  await page.getByText("Fonte privada não verificada", { exact: false }).first().waitFor();
-  await page.getByText("Referência informada", { exact: false }).first().waitFor();
+  await page.getByRole("tab", { name: "Buscar edição no catálogo" }).click();
+  const importedQuote = page.locator(".market-group").filter({ hasText: csvDeckboxName }).locator(".market-quote").filter({ hasText: "REFERENCIA PRIVADA F93" });
+  await importedQuote.getByTestId("market-source-status").getByText("Fonte privada não verificada", { exact: true }).waitFor();
+  await importedQuote.getByTestId("market-price-type").getByText("Referência informada", { exact: true }).waitFor();
   results.push("Passo 12: Origem privada e data recente de referências BRL verificadas");
 
   // PASSO 13: Gerar e visualizar recomendações de preço
@@ -293,7 +334,7 @@ ${csvSleeveName},pt-BR,new,standard,REFERENCIA PRIVADA F93,reference,BRL,52.00,$
   console.log("-> Passo 15: Aprovar manualmente uma recomendação");
   const applyPost = page.waitForResponse((r) => r.url().includes("/api/autopilot/apply") && r.request().method() === "POST");
   page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "Confirmar preço no balcão" }).click();
+  await page.getByRole("button", { name: /Alterar preço do estoque para/ }).click();
   const applyRes = await applyPost;
   assert.equal(applyRes.status(), 200, "Autopilot apply returned 200");
   const applyBody = await applyRes.json();
@@ -342,13 +383,35 @@ ${csvSleeveName},pt-BR,new,standard,REFERENCIA PRIVADA F93,reference,BRL,52.00,$
   assert.equal(restoredPriceText, "R$ 65.00", "Preço foi exatamente restaurado para R$ 65.00");
   results.push("Passo 19: Restauração exata do preço de R$ 65.00 comprovada no estoque");
 
-  // PASSO 20: Verificar indicadores e gráficos do dashboard
-  console.log("-> Passo 20: Verificar dashboard e indicadores finais");
+  // Evidência adicional: painel atualizado após o rollback
+  console.log("-> Evidência adicional: verificar dashboard após rollback");
   await page.goto(`${origin}/dashboard`);
   await page.getByRole("heading", { name: "Histórico e Posicionamento de Preços" }).waitFor();
   await page.screenshot({ path: ".tools/phase93-dashboard.png", fullPage: true });
   assert.deepEqual(pageErrors, [], "Nenhum erro de página (pageerror) durante a jornada");
-  results.push("Passo 20: Dashboard visualizado com histórico real e captura de tela registrada");
+  results.push("Evidência adicional: Dashboard visualizado com histórico real e captura de tela registrada");
+
+  // PASSO 20: Sessão de outra organização não pode consultar nem alterar o item da organização principal.
+  console.log("-> Passo 20: Verificar isolamento entre organizações");
+  const foreignContext = await browser.newContext();
+  const foreignPage = await foreignContext.newPage();
+  try {
+    await foreignPage.goto(`${origin}/login`);
+    await foreignPage.getByLabel("E-mail", { exact: true }).fill(foreignEmail);
+    await foreignPage.getByLabel("Senha", { exact: true }).fill(foreignPassword);
+    await foreignPage.getByRole("button", { name: "Entrar", exact: true }).click();
+    await foreignPage.waitForURL("**/dashboard", { timeout: 15_000 });
+    const foreignMarket = await foreignPage.request.get(`${origin}/api/market?inventoryItemId=${importedReference.inventoryItemId}&currency=BRL&days=30`);
+    assert.equal(foreignMarket.status(), 200, "A segunda organização recebeu resposta de consulta própria");
+    assert.equal((await foreignMarket.json()).groups.length, 0, "A segunda organização não recebeu a referência BRL da primeira");
+    const foreignUpdate = await foreignPage.request.patch(`${origin}/api/inventory/${importedReference.inventoryItemId}`, {
+      data: { price: "1.00" },
+    });
+    assert.equal(foreignUpdate.status(), 404, "A segunda organização não pode alterar o item da primeira");
+  } finally {
+    await foreignContext.close();
+  }
+  results.push("Passo 20: Isolamento entre organizações confirmado para consulta e alteração");
 
   console.log("\n==========================================");
   console.log("JORNADA DE 20 PASSOS CONCLUÍDA COM SUCESSO!");
@@ -370,5 +433,4 @@ ${csvSleeveName},pt-BR,new,standard,REFERENCIA PRIVADA F93,reference,BRL,52.00,$
   process.exitCode = 1;
 } finally {
   await browser.close();
-  process.exit(process.exitCode || 0);
 }
