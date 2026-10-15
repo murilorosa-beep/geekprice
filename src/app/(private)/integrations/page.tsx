@@ -29,6 +29,12 @@ export default async function IntegrationsPage() {
 
   const providers = [
     {
+      name: "PkmnPrices",
+      games: "Pokémon TCG físico",
+      active: Boolean(process.env.PKMNPRICES_API_KEY),
+      detail: "Busca por coleção e número; preços TCGplayer em USD por condição e acabamento",
+    },
+    {
       name: "TCGdex",
       games: "Pokémon",
       active: true,

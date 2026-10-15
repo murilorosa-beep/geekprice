@@ -21,8 +21,9 @@ export async function listInventory(organizationId: string, query: z.infer<typeo
     hasUnverifiedReference: sql<boolean>`bool_or(${sources.kind} = 'national_public_quote' or coalesce(${sources.config}->>'type', '') = 'unverified_national_reference')`.as("has_unverified_reference"),
   })
     .from(externalListings)
-    .innerJoin(sources, and(eq(sources.id, externalListings.sourceId), eq(sources.organizationId, organizationId), eq(sources.active, true)))
+    .innerJoin(sources, and(eq(sources.id, externalListings.sourceId), eq(sources.organizationId, organizationId), eq(sources.active, true), sql`${sources.config}->>'verified' = 'true'`))
     .innerJoin(priceObservations, and(eq(priceObservations.listingId, externalListings.id), eq(priceObservations.available, true), eq(priceObservations.currency, "BRL"), eq(priceObservations.region, "BR"), eq(priceObservations.type, "reference"), gte(priceObservations.referenceAt, freshSince)))
+    .innerJoin(productVariants, and(eq(productVariants.id, externalListings.variantId), eq(priceObservations.condition, productVariants.condition), eq(priceObservations.finish, productVariants.finish)))
     .innerJoin(inventoryItems, and(eq(inventoryItems.variantId, externalListings.variantId), eq(inventoryItems.organizationId, organizationId)))
     .groupBy(externalListings.variantId).as("market");
   const [rows, totalResult] = await Promise.all([
@@ -51,8 +52,9 @@ export async function listAllInventory(organizationId: string) {
     hasUnverifiedReference: sql<boolean>`bool_or(${sources.kind} = 'national_public_quote' or coalesce(${sources.config}->>'type', '') = 'unverified_national_reference')`.as("has_unverified_reference"),
   })
     .from(externalListings)
-    .innerJoin(sources, and(eq(sources.id, externalListings.sourceId), eq(sources.organizationId, organizationId), eq(sources.active, true)))
+    .innerJoin(sources, and(eq(sources.id, externalListings.sourceId), eq(sources.organizationId, organizationId), eq(sources.active, true), sql`${sources.config}->>'verified' = 'true'`))
     .innerJoin(priceObservations, and(eq(priceObservations.listingId, externalListings.id), eq(priceObservations.available, true), eq(priceObservations.currency, "BRL"), eq(priceObservations.region, "BR"), eq(priceObservations.type, "reference"), gte(priceObservations.referenceAt, freshSince)))
+    .innerJoin(productVariants, and(eq(productVariants.id, externalListings.variantId), eq(priceObservations.condition, productVariants.condition), eq(priceObservations.finish, productVariants.finish)))
     .innerJoin(inventoryItems, and(eq(inventoryItems.variantId, externalListings.variantId), eq(inventoryItems.organizationId, organizationId)))
     .groupBy(externalListings.variantId).as("market");
 
@@ -92,10 +94,10 @@ export async function listInventoryChunk(
       hasUnverifiedReference: sql<boolean>`bool_or(${sources.kind} = 'national_public_quote' or coalesce(${sources.config}->>'type', '') = 'unverified_national_reference')`.as("has_unverified_reference"),
     })
     .from(externalListings)
-    .innerJoin(
-      sources,
-      and(eq(sources.id, externalListings.sourceId), eq(sources.organizationId, organizationId), eq(sources.active, true))
-    )
+      .innerJoin(
+        sources,
+        and(eq(sources.id, externalListings.sourceId), eq(sources.organizationId, organizationId), eq(sources.active, true), sql`${sources.config}->>'verified' = 'true'`)
+      )
     .innerJoin(
       priceObservations,
       and(
@@ -107,10 +109,11 @@ export async function listInventoryChunk(
         gte(priceObservations.referenceAt, freshSince)
       )
     )
-    .innerJoin(
-      inventoryItems,
-      and(eq(inventoryItems.variantId, externalListings.variantId), eq(inventoryItems.organizationId, organizationId))
-    )
+      .innerJoin(productVariants, and(eq(productVariants.id, externalListings.variantId), eq(priceObservations.condition, productVariants.condition), eq(priceObservations.finish, productVariants.finish)))
+      .innerJoin(
+        inventoryItems,
+        and(eq(inventoryItems.variantId, externalListings.variantId), eq(inventoryItems.organizationId, organizationId))
+      )
     .groupBy(externalListings.variantId)
     .as("market");
 

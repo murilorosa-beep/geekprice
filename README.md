@@ -2,6 +2,8 @@
 
 Para a instalacao conectada ao Supabase, consulte [docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md). O inicializador reconhece PostgreSQL remoto sem Docker; migrations e seed remotos exigem execucao explicita depois de backup.
 
+Para publicar um piloto no Railway, siga [docs/RAILWAY_DEPLOY.md](docs/RAILWAY_DEPLOY.md). O cadastro público permanece fechado enquanto o e-mail transacional e os documentos revisados não forem configurados.
+
 Estado técnico mais recente: [PROJECT_STATUS.md](PROJECT_STATUS.md). A aplicação principal usa Supabase; o PostgreSQL local descrito abaixo é uma opção para instalações separadas.
 
 SaaS B2B multiempresa para controle de estoque e inteligência de preços de lojas de TCG e produtos geek.
@@ -164,7 +166,7 @@ Lorcana, One Piece, Gundam e Riftbound estão preparados por meio da Scrydex, ma
 - Os Termos de Uso e a Política de Privacidade são rascunhos. O cadastro público permanece bloqueado até revisão jurídica, configuração das versões aprovadas e habilitação explícita.
 - O gráfico histórico usa observações reais e mostra estado vazio quando não há ao menos dois pontos temporais comparáveis.
 - O catálogo canônico pode ser compartilhado; SKUs internos e estoque são privados por organização. A interface não altera metadados canônicos globais após o cadastro.
-- Cotações BRL de CSV ficam privadas e não são verificadas automaticamente. Só referências com até 30 dias alimentam a precificação; anúncios e vendas informadas aparecem separadamente no Mercado.
+- Cotações BRL de CSV ficam privadas e não são verificadas automaticamente. Apenas referências verificadas, recentes e da mesma condição e acabamento alimentam a precificação; anúncios e vendas informadas aparecem separadamente no Mercado.
 
 ## Produto comercial (Fase 7)
 

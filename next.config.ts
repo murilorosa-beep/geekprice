@@ -13,6 +13,7 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  distDir: process.env.GEEKPRICE_BUILD_DIST_DIR || ".next",
   async headers() {
     return [
       {

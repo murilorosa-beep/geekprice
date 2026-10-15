@@ -2,6 +2,10 @@
   "name": "geekprice",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "npm@11.17.0",
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -24,8 +28,8 @@
     "worker:autopilot:once": "tsx --env-file=.env scripts/run-autopilot-worker.ts --once",
     "db:check": "tsx scripts/verify-migration-snapshots.ts",
     "admin:create": "tsx --env-file=.env scripts/create-master-admin.ts",
-    "admin:rotate": "tsx --env-file=.env scripts/rotate-admin-password.ts",
-    "admin:create-murilo": "tsx --env-file=.env scripts/create-admin-murilo.ts"
+    "admin:create:railway": "tsx scripts/create-master-admin.ts",
+    "admin:rotate": "tsx --env-file=.env scripts/rotate-admin-password.ts"
   },
   "dependencies": {
     "@next/env": "^16.4.0",
@@ -36,6 +40,7 @@
     "clsx": "latest",
     "csv-parse": "^7.0.3",
     "decimal.js": "^10.6.0",
+    "drizzle-kit": "^0.31.11",
     "drizzle-orm": "^0.45.4",
     "lucide-react": "latest",
     "next": "latest",
@@ -44,6 +49,7 @@
     "react": "latest",
     "react-dom": "latest",
     "tailwind-merge": "latest",
+    "tsx": "^4.23.15",
     "zod": "^4.6.5"
   },
   "devDependencies": {
@@ -51,10 +57,8 @@
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
-    "drizzle-kit": "^0.31.11",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.4.0",
-    "tsx": "^4.23.15",
     "typescript": "latest",
     "vitest": "^5.0.3"
   },

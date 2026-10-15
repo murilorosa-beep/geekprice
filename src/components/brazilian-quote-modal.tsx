@@ -243,7 +243,7 @@ export function BrazilianQuoteModal({
         {/* Proveniência e Selos de Auditoria */}
         {data && (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
-            {data.fromCache ? (
+            {data.status === "ok" && data.fromCache ? (
               <span
                 style={{
                   fontSize: "0.75rem",
@@ -260,7 +260,7 @@ export function BrazilianQuoteModal({
                 <Clock size={12} /> Cotação em Cache (coletada em{" "}
                 {new Date(data.collectedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })})
               </span>
-            ) : (
+            ) : data.status === "ok" ? (
               <span
                 style={{
                   fontSize: "0.75rem",
@@ -276,9 +276,9 @@ export function BrazilianQuoteModal({
               >
                 <Sparkles size={12} /> Coleta Recente (ao vivo)
               </span>
-            )}
+            ) : null}
 
-            <span
+            {data.status === "ok" && <span
               style={{
                 fontSize: "0.75rem",
                 background: "rgba(245, 158, 11, 0.12)",
@@ -292,7 +292,7 @@ export function BrazilianQuoteModal({
               }}
             >
               <ShieldAlert size={12} /> Fonte Externa Não-Homologada
-            </span>
+            </span>}
 
             {data.statsScope === "targeted_edition" && data.targetEdition && (
               <span

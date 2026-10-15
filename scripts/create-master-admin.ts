@@ -15,7 +15,12 @@ import { ensureMasterAdminOrganizationOwner } from "../src/server/admin/master-a
 
 async function main() {
   const adminEmail = (process.env.ADMIN_EMAIL || "admin@geekprice.com.br").trim().toLowerCase();
+  const adminName = (process.env.ADMIN_NAME || "Administrador GeekPrice").trim();
+  if (!adminName) throw new Error("ADMIN_NAME não pode ser vazio.");
   const rawPassword = process.env.ADMIN_PASSWORD || process.env.SEED_ADMIN_PASSWORD;
+  if (process.env.RAILWAY_ENVIRONMENT_ID && !rawPassword) {
+    throw new Error("Defina ADMIN_PASSWORD no Railway antes de provisionar o administrador.");
+  }
 
   let password = rawPassword?.trim();
   let generatedLocally = false;
@@ -107,7 +112,7 @@ async function main() {
       await tx
         .update(users)
         .set({
-          name: "Murilo Rosa (Admin Master)",
+          name: adminName,
           passwordHash,
           active: true,
           emailVerifiedAt: now,
@@ -120,7 +125,7 @@ async function main() {
       [userMaster] = await tx
         .insert(users)
         .values({
-          name: "Murilo Rosa (Admin Master)",
+          name: adminName,
           email: adminEmail,
           passwordHash,
           active: true,

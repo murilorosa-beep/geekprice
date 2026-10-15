@@ -6,6 +6,7 @@ import {
   inventoryItems,
   priceChangeHistory,
   priceObservations,
+  productVariants,
   sources,
 } from "@/db/schema";
 
@@ -49,7 +50,8 @@ export async function getOrganizationMarketHistory(
     })
     .from(priceObservations)
     .innerJoin(externalListings, eq(externalListings.id, priceObservations.listingId))
-    .innerJoin(sources, and(eq(sources.id, externalListings.sourceId), eq(sources.organizationId, organizationId), eq(sources.active, true)))
+    .innerJoin(sources, and(eq(sources.id, externalListings.sourceId), eq(sources.organizationId, organizationId), eq(sources.active, true), sql`${sources.config}->>'verified' = 'true'`))
+    .innerJoin(productVariants, and(eq(productVariants.id, externalListings.variantId), eq(priceObservations.condition, productVariants.condition), eq(priceObservations.finish, productVariants.finish)))
     .innerJoin(
       inventoryItems,
       and(

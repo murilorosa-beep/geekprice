@@ -7,6 +7,7 @@ import { MarketMyCards } from "@/components/market-my-cards";
 import { BrlMarketImport } from "@/components/brl-market-import";
 import { SmartRegistrationModal } from "@/components/smart-registration-modal";
 import { BrazilianQuoteModal } from "@/components/brazilian-quote-modal";
+import { PkmnPricesLookup } from "@/components/pkmnprices-lookup";
 import {
   AlertCircle,
   BookOpen,
@@ -67,8 +68,8 @@ type Group = {
   history: Array<{ price: number; referenceAt: string; source: string }>;
 };
 
-export function MarketExplorer({ canManage }: { canManage: boolean }) {
-  const [activeTab, setActiveTab] = useState<"mine" | "catalog">("mine");
+export function MarketExplorer({ canManage, pkmnPricesAvailable = false }: { canManage: boolean; pkmnPricesAvailable?: boolean }) {
+  const [activeTab, setActiveTab] = useState<"mine" | "catalog" | "physical">("mine");
   const [registerCard, setRegisterCard] = useState<{ id: string; language: string } | null>(null);
   const [name, setName] = useState("");
   const [collection, setCollection] = useState("");
@@ -186,8 +187,9 @@ export function MarketExplorer({ canManage }: { canManage: boolean }) {
       <div className="market-tabs" role="tablist" aria-label="Mercado">
         <button type="button" role="tab" aria-selected={activeTab === "mine"} className={activeTab === "mine" ? "active" : ""} onClick={() => setActiveTab("mine")}>Minhas cartas e preços</button>
         <button type="button" role="tab" aria-selected={activeTab === "catalog"} className={activeTab === "catalog" ? "active" : ""} onClick={() => setActiveTab("catalog")}>Buscar edição no catálogo</button>
+        {pkmnPricesAvailable && <button type="button" role="tab" aria-selected={activeTab === "physical"} className={activeTab === "physical" ? "active" : ""} onClick={() => setActiveTab("physical")}>Pokémon físico · preços USD</button>}
       </div>
-      {activeTab === "mine" ? <MarketMyCards canManage={canManage} onSearchEdition={(item) => { setStockId(item.id); setStock((current) => current.some((stockItem) => stockItem.id === item.id) ? current : [...current, { id: item.id, name: item.name, sku: item.sku, set: item.set }]); setName(item.name); setCollection(item.set ?? ""); setNumber(item.code ?? ""); setLanguage(item.language.toLowerCase()); setActiveTab("catalog"); setShowGuide(false); }}/> : <>
+      {activeTab === "mine" ? <MarketMyCards canManage={canManage} onSearchEdition={(item) => { setStockId(item.id); setStock((current) => current.some((stockItem) => stockItem.id === item.id) ? current : [...current, { id: item.id, name: item.name, sku: item.sku, set: item.set }]); setName(item.name); setCollection(item.set ?? ""); setNumber(item.code ?? ""); setLanguage(item.language.toLowerCase()); setActiveTab("catalog"); setShowGuide(false); }}/> : activeTab === "physical" ? <PkmnPricesLookup /> : <>
 
       {!showGuide && <div className="market-guide-summary"><HelpCircle size={18}/><span><strong>Para produtos manuais:</strong> encontre a edição exata, vincule ao estoque e veja as referências disponíveis. Referências em USD/EUR não liberam mudança de preço.</span><button type="button" className="secondary small" onClick={() => setShowGuide(true)}>Ver passo a passo</button></div>}
       {/* GUIA EXPLICATIVO PARA O LOJISTA */}
@@ -332,7 +334,7 @@ export function MarketExplorer({ canManage }: { canManage: boolean }) {
             </p>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
               {canManage && <button type="button" className="primary small" onClick={() => setRegisterCard({ id: detail.id, language })}><Plus size={16}/> Adicionar esta edição ao meu estoque</button>}
-              <button
+              {!detail.image?.includes("/tcgp/") && <button
                 type="button"
                 className="secondary small"
                 style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
@@ -342,8 +344,9 @@ export function MarketExplorer({ canManage }: { canManage: boolean }) {
                   number: detail.localId,
                 })}
               >
-                <Sparkles size={15} style={{ color: "#10b981" }} /> Cotação BR (Liga Pokémon)
-              </button>
+                <Sparkles size={15} style={{ color: "#10b981" }} /> Consultar cotação BR
+              </button>}
+              {detail.image?.includes("/tcgp/") && <span className="muted">Carta digital TCG Pocket: a fonte de preços de cartas físicas não se aplica.</span>}
             </div>
           </div>
 
@@ -475,7 +478,7 @@ export function MarketExplorer({ canManage }: { canManage: boolean }) {
               </div>
               <div className="market-quotes">{quotes.map((g, n) => <div className="market-quote" key={n}>
               <strong className="market-quote-label">{g.currency} · {g.finish || "padrão"} · {g.source}</strong>
-              <div className="market-stats">
+              {g.sourceVerified || g.region !== "BR" ? <div className="market-stats">
                 <span>
                   Mínimo<strong>{g.currency} {g.min.toFixed(2)}</strong>
                 </span>
@@ -488,10 +491,10 @@ export function MarketExplorer({ canManage }: { canManage: boolean }) {
                 <span>
                   Fonte<strong>{g.source}</strong>
                 </span>
-              </div>
+              </div> : <p className="market-note">Valores importados ou informados manualmente. Confira a origem e a variante; estes números não entram na sugestão de preço.</p>}
               <p className="market-note">
                 {g.region === "BR"
-                  ? "Mercado brasileiro (BRL)"
+                  ? g.sourceVerified ? "Cotação brasileira verificada (BRL)" : "Referência privada em BRL; fora das recomendações"
                   : "Referência internacional (não representa preço direto praticado no Brasil)"}
                 {" · "}
                 <span data-testid="market-source-status">

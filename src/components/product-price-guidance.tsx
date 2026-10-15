@@ -36,13 +36,13 @@ export function ProductPriceGuidance({ items, detail = false }: { items: Item[];
     {error ? <p className="muted">Não foi possível carregar as orientações agora.</p> : !queue ? <p className="muted">Calculando orientações...</p> : <div className="product-guidance-list">{items.map((item) => {
       const guidance = queue.get(item.id);
       if (!guidance) return null;
-      const actionable = guidance.marketPrice != null && guidance.safetyGate !== "missing_cost" && guidance.safetyGate !== "missing_current_price" && guidance.safetyGate !== "margin_below_minimum";
+      const actionable = guidance.marketPrice != null && guidance.safetyStatus === "safe_auto";
       return <div className="product-guidance-item" key={item.id}>
         {!detail && <strong>{item.name}</strong>}
-        <span>{guidance.marketPrice == null ? "Sem cotação BRL recente" : `Mercado BRL: ${money.format(guidance.marketPrice)}`}</span>
+        <span>{guidance.marketPrice == null ? "Sem cotação BRL verificada para esta variante" : `Mercado BRL verificado: ${money.format(guidance.marketPrice)}`}</span>
         <span>Piso mínimo calculado: {money.format(guidance.minimumPrice)}</span>
-        <strong className={actionable ? "guidance-value" : "guidance-preview"}>{actionable ? `Sugestão para análise: ${money.format(guidance.suggestedPrice)}` : `Simulação por custo: ${money.format(guidance.suggestedPrice)}`}</strong>
-        <small>{guidance.marketPrice == null ? "Não é recomendação de mercado e não altera seu preço. Associe uma fonte brasileira da edição correta no Mercado." : guidance.safetyReason}</small>
+        <strong className={actionable ? "guidance-value" : "guidance-preview"}>{actionable ? `Sugestão para análise: ${money.format(guidance.suggestedPrice)}` : guidance.marketPrice == null ? `Simulação por custo: ${money.format(guidance.suggestedPrice)}` : `Simulação bloqueada para revisão: ${money.format(guidance.suggestedPrice)}`}</strong>
+        <small>{guidance.marketPrice == null ? "Este valor é apenas uma simulação por custo, taxas e margem. Referências privadas sem condição e acabamento não entram no cálculo." : guidance.safetyReason}</small>
         <Link href={guidance.marketPrice == null ? "/market" : "/recommendations"}>{guidance.marketPrice == null ? "Consultar Mercado" : "Revisar no Autopilot"}</Link>
       </div>;
     })}</div>}
