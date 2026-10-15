@@ -14,6 +14,7 @@ export type Product = {
   change: number;
   status: ProductStatus;
   image: string;
+  imageUrl?: string | null;
 };
 
 export type DashboardData = {

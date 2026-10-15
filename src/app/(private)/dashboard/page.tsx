@@ -38,7 +38,7 @@ export default async function DashboardPage() {
     const status: ProductStatus = item.currentPrice < recommendation.minimumPrice ? "attention" : !item.marketPrice ? "healthy" : change < -5 ? "opportunity" : change > 5 ? "attention" : "healthy";
     return { id: item.id, name: item.name, set: item.set ?? "Sem coleção", code: item.code ?? item.sku, category: item.category,
       cost: item.cost, currentPrice: item.currentPrice, marketPrice: item.marketPrice, stock: item.stock, desiredMarginPercent: item.desiredMarginPercent, change, status,
-      image: item.name.split(/\s+/).map((part) => part[0]).join("").slice(0, 3).toUpperCase() };
+      image: item.name.split(/\s+/).map((part) => part[0]).join("").slice(0, 3).toUpperCase(), imageUrl: item.imageUrl };
   });
   const mappedAlerts: Alert[] = alertRows.map((alert) => ({ id: alert.id, title: alert.title, description: alert.message,
     time: alert.createdAt.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }),

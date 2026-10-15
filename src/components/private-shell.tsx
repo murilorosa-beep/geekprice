@@ -6,6 +6,7 @@ import { signOut } from "next-auth/react";
 import { usePathname } from "next/navigation";
 import { Bell, Box, ChartNoAxesCombined, ChevronDown, CreditCard, LayoutDashboard, Layers, LibraryBig, Menu, Plug, Settings, Sparkles, Store, UserRound, X } from "lucide-react";
 import type { MemberRole } from "@/server/auth/permissions";
+import { GeekMark } from "./tcg-art";
 
 const items = [
   { href: "/dashboard", label: "Visão geral", icon: LayoutDashboard },
@@ -21,9 +22,9 @@ export function PrivateShell({ userName, organizationName, role, children }: { u
   const active = usePathname();
   return <div className="app-shell">
     <aside className={`sidebar ${open ? "open" : ""}`}>
-      <div className="brand"><div className="brand-mark">G</div><span>GeekPrice</span><button className="mobile-close" onClick={() => setOpen(false)}><X size={20}/></button></div>
+      <div className="brand"><GeekMark/><span>GeekPrice<small>THE COLLECTOR WORKSPACE</small></span><button aria-label="Fechar menu" className="mobile-close" onClick={() => setOpen(false)}><X size={20}/></button></div>
       <div className="workspace"><div className="workspace-avatar">{organizationName.slice(0, 2).toUpperCase()}</div><div><strong>{organizationName}</strong><span>Ambiente da loja</span></div><ChevronDown size={16}/></div>
-      <nav><p className="nav-label">PAINEL</p>{items.map(({ href, label, icon: Icon }) => <Link key={href} href={href} className={active === href ? "active" : ""} onClick={() => setOpen(false)}><Icon size={19}/><span>{label}</span></Link>)}
+      <nav aria-label="Menu principal"><p className="nav-label">SEU WORKSPACE</p>{items.map(({ href, label, icon: Icon }) => <Link key={href} href={href} aria-current={active === href ? "page" : undefined} className={active === href ? "active" : ""} onClick={() => setOpen(false)}><Icon size={19}/><span>{label}</span></Link>)}
         <p className="nav-label second">PLATAFORMA</p>
         <Link href="/platform" className={active === "/platform" ? "active" : ""}><Layers size={19}/><span>Meus softwares</span></Link>
         <Link href="/billing" className={active === "/billing" ? "active" : ""}><CreditCard size={19}/><span>Plano e consumo</span></Link>
@@ -35,7 +36,7 @@ export function PrivateShell({ userName, organizationName, role, children }: { u
       </nav>
       <button className="profile profile-button" onClick={() => signOut({ callbackUrl: "/login" })}><div className="avatar">{userName.slice(0, 2).toUpperCase()}</div><div><strong>{userName}</strong><span>Sair da conta</span></div><ChevronDown size={16}/></button>
     </aside>
-    <main><header className="topbar page-topbar"><button className="mobile-menu" onClick={() => setOpen(true)}><Menu size={22}/></button><strong>{active === "/dashboard" ? "Dashboard" : active === "/platform" ? "Meus softwares" : items.find((item) => item.href === active)?.label ?? (active === "/store" ? "Minha loja" : active === "/integrations" ? "Integrações" : active === "/billing" ? "Plano e consumo" : active === "/team" ? "Equipe" : "Configurações")}</strong></header>{children}</main>
+    <main><header className="topbar page-topbar"><button aria-label="Abrir menu" aria-expanded={open} className="mobile-menu" onClick={() => setOpen(true)}><Menu size={22}/></button><span className="topbar-breadcrumb">Workspace <span>/</span></span><strong>{active === "/dashboard" ? "Visão geral" : active === "/platform" ? "Meus softwares" : items.find((item) => item.href === active)?.label ?? (active === "/store" ? "Minha loja" : active === "/integrations" ? "Integrações" : active === "/billing" ? "Plano e consumo" : active === "/team" ? "Equipe" : "Configurações")}</strong><span className="topbar-tcg"><i/> TCG WORKSPACE <Sparkles size={14}/></span></header><div key={active} className="workspace-page-enter">{children}</div></main>
     {open && <div className="backdrop" onClick={() => setOpen(false)}/>} 
   </div>;
 }

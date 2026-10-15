@@ -1571,7 +1571,7 @@ th { background:#10192b;color:#98a7c2; }
 td { color:#b7c4da;border-top-color:#27344d; }
 td>strong { color:#edf2ff; }
 .pagination { border-top-color:#293752;color:var(--muted); }
-.pagination button,.secondary,.page-content button:not(.primary):not(.danger):not(.row-action) { color:#dce5f7;background:#172239;border-color:#34425e; }
+.pagination button,.secondary { color:#dce5f7;background:#172239;border-color:#34425e; }
 .primary,.catalog-search-button { color:#fff;background:linear-gradient(110deg,#7258e6,#8d77f4);box-shadow:0 5px 16px #7258e633; }
 .primary:hover,.catalog-search-button:hover { background:linear-gradient(110deg,#8068f1,#9b87ff); }
 .metric-icon.violet { color:#c3b8ff;background:#30285a; }

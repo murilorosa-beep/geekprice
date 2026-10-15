@@ -1,14 +1,16 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element -- Imagens HTTPS do catálogo já associado ao estoque. */
 import { useMemo, useState } from "react";
 import {
   Bell, CircleDollarSign, Download, Gauge, PackageSearch, Search, Sparkles,
-  TrendingDown, TrendingUp, Upload, X,
+  TrendingDown, TrendingUp, Upload, X, ArrowUpRight, Layers, Star,
 } from "lucide-react";
 import { calculateRecommendation } from "@/lib/pricing";
 import type { DashboardData, Product } from "@/lib/types";
 import { ImportCsvModal } from "./import-csv-modal";
 import Link from "next/link";
+import { TcgCardFan } from "./tcg-art";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -82,16 +84,26 @@ export function Dashboard({ initialData }: { initialData: DashboardData }) {
   };
 
   return (
-    <div className="page-content">
+    <div className="page-content dashboard-page">
+      <section className="collection-hero">
+        <div className="collection-hero-copy">
+          <span className="tcg-kicker"><i/> SEU UNIVERSO TCG, EM ORDEM</span>
+          <h1>Sua coleção.<br/><span>Seu próximo movimento.</span></h1>
+          <p>Olá, {initialData.userName.split(" ")[0]}. Cuide das suas cartas, acompanhe o mercado e encontre espaço para crescer.</p>
+          <div className="hero-stock-value"><span>Valor de venda em estoque</span><strong>{brl.format(products.reduce((total, product) => total + product.currentPrice * product.stock, 0))}</strong><small>Preços cadastrados × unidades em estoque</small></div>
+          <Link href="/catalog" className="hero-collection-link">Explorar catálogo <ArrowUpRight size={17}/></Link>
+        </div>
+        <TcgCardFan cards={products.filter((product) => product.imageUrl).slice(0, 3)}/>
+      </section>
       <div className="page-title dashboard-toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem", marginBottom: "1.5rem" }}>
         <div className="global-search" style={{ flex: 1, maxWidth: "480px" }}>
           <Search size={18} />
           <input
+            aria-label="Buscar produtos no painel"
             value={query}
             onChange={(e) => { setQuery(e.target.value); setPage(1); }}
             placeholder="Buscar produto, coleção ou código..."
           />
-          <kbd>⌘ K</kbd>
         </div>
         <div className="page-actions">
           <button className="primary small" onClick={() => setImportOpen(true)}>
@@ -100,18 +112,6 @@ export function Dashboard({ initialData }: { initialData: DashboardData }) {
           </button>
         </div>
       </div>
-
-      <section className="page-heading">
-        <div>
-          <p className="eyebrow">PAINEL DA SUA LOJA</p>
-          <h1>Olá, {initialData.userName.split(" ")[0]} <span>👋</span></h1>
-          <p>Acompanhe o que mudou no seu estoque e no mercado.</p>
-        </div>
-        <div className="sync">
-          <span><i /> Dados persistidos</span>
-          <small>Atualização automática</small>
-        </div>
-      </section>
 
       {products.length === 0 && (
         <section
@@ -157,18 +157,26 @@ export function Dashboard({ initialData }: { initialData: DashboardData }) {
 
       <section className="metrics">
         <Metric icon={<PackageSearch />} label="Produtos cadastrados" value={String(products.length)} detail="itens carregados" tone="violet" />
-        <Metric icon={<Gauge />} label="Estoque total" value={String(summary.totalStock)} detail="unidades cadastradas" tone="green" up />
+        <Metric icon={<Gauge />} label="Estoque total" value={String(summary.totalStock)} detail="unidades cadastradas" tone="green" />
         <Metric icon={<TrendingDown />} label="Abaixo do mínimo" value={String(summary.belowMinCount)} detail="exigem revisão" tone="red" />
         <Metric icon={<Sparkles />} label="Com ajuste sugerido" value={String(summary.suggestedCount)} detail="recomendações" tone="amber" />
         <Metric icon={<CircleDollarSign />} label="Margem média" value={`${summary.avgMargin}%`} detail="estimada" tone="green" />
         <Metric icon={<Bell />} label="Sem preço externo" value={String(summary.withoutMarketCount)} detail="sem referência" tone="violet" />
       </section>
 
+      {filtered.length > 0 && <section className="collection-showcase" aria-label="Cartas do seu estoque">
+        <div className="collection-section-title"><div><span className="eyebrow">CADA CARTA CONTA</span><h2>No seu estoque</h2></div><Link href="/products">Ver coleção <ArrowUpRight size={16}/></Link></div>
+        <div className="collection-shelf">{filtered.slice(0, 5).map((product) => <button className="stock-collectible" key={product.id} onClick={() => setSelected(product)}>
+          <div className="stock-collectible-art">{product.imageUrl?.startsWith("https://") ? <img src={product.imageUrl} alt={product.name} loading="lazy"/> : <div className="collectible-placeholder"><Layers size={32}/><span>{product.image}</span></div>}<span className="stock-collectible-quantity">{product.stock} un.</span></div>
+          <span className="stock-collectible-name">{product.name}</span><small>{product.set} · {product.code}</small><strong>{brl.format(product.currentPrice)}</strong><span className="collectible-open">Analisar carta <ArrowUpRight size={13}/></span>
+        </button>)}</div>
+      </section>}
+
       <section className="grid-main">
         <PriceChart initialHistory={initialData.initialHistory} />
         <div className="panel alerts-panel">
           <div className="panel-title"><div><h2>Alertas recentes</h2><p>Movimentos que merecem atenção</p></div><Link href="/alerts">Ver todos</Link></div>
-          <div className="alert-list">{alerts.map((alert) => <div className="alert" key={alert.id}><i className={alert.tone}/><div><strong>{alert.title}</strong><p>{alert.description}</p><span>{alert.time}</span></div></div>)}</div>
+          <div className="alert-list">{alerts.map((alert) => <div className="alert" key={alert.id}><i className={alert.tone}/><div><strong>{alert.title}</strong><p>{alert.description}</p><span>{alert.time}</span></div></div>)}{alerts.length === 0 && <div className="tcg-empty"><Sparkles size={24}/><strong>Tudo tranquilo por aqui.</strong><p>Novos alertas da sua loja aparecem neste espaço.</p></div>}</div>
         </div>
       </section>
 
@@ -193,13 +201,13 @@ export function Dashboard({ initialData }: { initialData: DashboardData }) {
 }
 
 function Metric({ icon, label, value, detail, tone, up }: { icon: React.ReactNode; label: string; value: string; detail: string; tone: string; up?: boolean }) {
-  return <article className="metric"><div className={`metric-icon ${tone}`}>{icon}</div><div><p>{label}</p><strong>{value}</strong><span className={up ? "positive" : ""}>{up && <TrendingUp size={14}/>} {detail}</span></div></article>;
+  return <article className={`metric metric-${tone}`}><div className="metric-card-top"><div className={`metric-icon ${tone}`}>{icon}</div><Star size={12}/></div><div><p>{label}</p><strong>{value}</strong><span className={up ? "positive" : ""}>{up && <TrendingUp size={14}/>} {detail}</span></div></article>;
 }
 
 function ProductRow({ product, onOpen }: { product: Product; onOpen: () => void }) {
   const difference = product.marketPrice ? ((product.currentPrice - product.marketPrice) / product.marketPrice) * 100 : null;
   const status = product.status === "attention" ? "Revisar preço" : product.status === "opportunity" ? "Oportunidade" : "Competitivo";
-  return <tr><td><div className="product-cell"><div className={`product-thumb thumb-${Number(product.id.charCodeAt(0)) % 5 + 1}`}>{product.image}</div><div><strong>{product.name}</strong><span>{product.set} · {product.code}</span></div></div></td><td><strong>{brl.format(product.currentPrice)}</strong></td><td>{product.marketPrice == null ? "Sem dados" : brl.format(product.marketPrice)}</td><td>{difference == null ? <span className="muted">—</span> : <span className={difference < 0 ? "diff down" : "diff up"}>{difference > 0 ? "+" : ""}{difference.toFixed(1).replace(".", ",")}%</span>}</td><td>{product.stock} un.</td><td><span className={`status ${product.status}`}>{status}</span></td><td><button className="row-action" onClick={onOpen}>Analisar</button></td></tr>;
+  return <tr><td><div className="product-cell">{product.imageUrl?.startsWith("https://") ? <img className="product-art" src={product.imageUrl} alt="" loading="lazy"/> : <div className={`product-thumb thumb-${Number(product.id.charCodeAt(0)) % 5 + 1}`}>{product.image}</div>}<div><strong>{product.name}</strong><span>{product.set} · {product.code}</span></div></div></td><td><strong>{brl.format(product.currentPrice)}</strong></td><td>{product.marketPrice == null ? "Sem dados" : brl.format(product.marketPrice)}</td><td>{difference == null ? <span className="muted">—</span> : <span className={difference < 0 ? "diff down" : "diff up"}>{difference > 0 ? "+" : ""}{difference.toFixed(1).replace(".", ",")}%</span>}</td><td>{product.stock} un.</td><td><span className={`status ${product.status}`}>{status}</span></td><td><button className="row-action" onClick={onOpen}>Analisar</button></td></tr>;
 }
 
 function PriceChart({ initialHistory }: { initialHistory?: DashboardData["initialHistory"] }) {

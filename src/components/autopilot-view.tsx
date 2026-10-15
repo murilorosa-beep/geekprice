@@ -276,7 +276,7 @@ export function AutopilotView({
   }
 
   return (
-    <div className="page-content">
+    <div className="page-content autopilot-page">
       {/* Toast Feedback */}
       {toast && <div className="toast">{toast}</div>}
 
@@ -524,7 +524,7 @@ export function AutopilotView({
                     const isSelected = selectedIds.has(item.id);
 
                     return (
-                      <tr key={item.id} style={{ background: isSelected ? "#f5f3ff" : undefined }}>
+                      <tr key={item.id} style={{ background: isSelected ? "var(--violet-soft)" : undefined }}>
                         <td>
                           <input
                             type="checkbox"
@@ -571,8 +571,8 @@ export function AutopilotView({
                             disabled={loading}
                             onClick={() => setReviewItem(item)}
                             style={{
-                              background: isSafe ? "var(--violet-soft)" : "#f0f1f5",
-                              color: isSafe ? "var(--violet)" : "#5a5e73",
+                              background: isSafe ? "var(--violet-soft)" : "#292135",
+                              color: isSafe ? "var(--violet)" : "#c9b2dd",
                               padding: "6px 12px",
                               borderRadius: "7px",
                             }}

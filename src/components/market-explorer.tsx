@@ -7,6 +7,7 @@ import { MarketMyCards } from "@/components/market-my-cards";
 import { BrlMarketImport } from "@/components/brl-market-import";
 import { SmartRegistrationModal } from "@/components/smart-registration-modal";
 import { BrazilianQuoteModal } from "@/components/brazilian-quote-modal";
+import { TcgCardFan } from "./tcg-art";
 import { PkmnPricesLookup } from "@/components/pkmnprices-lookup";
 import {
   AlertCircle,
@@ -20,6 +21,8 @@ import {
   Search,
   Sparkles,
 } from "lucide-react";
+
+const quoteMoney = (currency: string, value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency }).format(value);
 
 type Card = {
   id: string;
@@ -161,12 +164,13 @@ export function MarketExplorer({ canManage, pkmnPricesAvailable = false }: { can
 
   return (
     <div className="page-content">
-      <div className="page-title">
+      <div className="page-title tcg-page-intro">
         <div>
           <p className="eyebrow">INTELIGÊNCIA DE PREÇOS</p>
-          <h1>Mercado</h1>
+          <h1>Cada carta tem seu mercado.</h1>
           <p>Veja suas cartas cadastradas, compare preços em reais e confirme a edição correta antes de decidir.</p>
         </div>
+        <TcgCardFan/>
       </div>
 
       {feedback && <div className="feedback">{feedback}</div>}
@@ -480,13 +484,13 @@ export function MarketExplorer({ canManage, pkmnPricesAvailable = false }: { can
               <strong className="market-quote-label">{g.currency} · {g.finish || "padrão"} · {g.source}</strong>
               {g.sourceVerified || g.region !== "BR" ? <div className="market-stats">
                 <span>
-                  Mínimo<strong>{g.currency} {g.min.toFixed(2)}</strong>
+                  Mínimo<strong>{quoteMoney(g.currency, g.min)}</strong>
                 </span>
                 <span>
-                  Mediana<strong>{g.currency} {g.median.toFixed(2)}</strong>
+                  Mediana<strong>{quoteMoney(g.currency, g.median)}</strong>
                 </span>
                 <span>
-                  Intervalo<strong>{g.min.toFixed(2)}–{g.max.toFixed(2)}</strong>
+                  Intervalo<strong>{quoteMoney(g.currency, g.min)}–{quoteMoney(g.currency, g.max)}</strong>
                 </span>
                 <span>
                   Fonte<strong>{g.source}</strong>
@@ -521,7 +525,7 @@ export function MarketExplorer({ canManage, pkmnPricesAvailable = false }: { can
                     <span key={`${p.referenceAt}-${p.price}`}>
                       {new Date(p.referenceAt).toLocaleDateString("pt-BR")}{" "}
                       <strong>
-                        {g.currency} {p.price.toFixed(2)}
+                        {quoteMoney(g.currency, p.price)}
                       </strong>
                     </span>
                   ))}

@@ -4,6 +4,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BadgeCheck, Database, Info, Search, ShieldCheck, Sparkles, Tag } from "lucide-react";
+import { TcgCardFan } from "./tcg-art";
 
 type Price = {
   externalVariantId: string;
@@ -157,7 +158,7 @@ export function MultigameCatalog() {
           <span><ShieldCheck size={16}/> Dados separados por loja</span>
         </div>
       </div>
-      <div className="hero-orbit" aria-hidden="true"><Database/><span>Catálogo<br/>multijogo</span></div>
+      <TcgCardFan/>
     </section>
 
     {error && <div className="form-error catalog-feedback">{error}</div>}
@@ -193,7 +194,7 @@ export function MultigameCatalog() {
       <div className="catalog-results-title"><div><span className="section-step">02</span><div><h2>Escolha a impressão</h2><p>{cards.length} resultado(s) — confira coleção e número.</p></div></div></div>
       <div className="catalog-grid">
         {cards.map((card) => <button className="catalog-card" key={card.id} onClick={() => choose(card)}>
-          <div className="catalog-card-image">{card.image ? <img src={card.image} alt=""/> : <span>{card.name.slice(0, 2)}</span>}<i>Ver detalhes</i></div>
+          <div className="catalog-card-image">{card.image ? <img src={card.image} alt="" loading="lazy"/> : <span>{card.name.slice(0, 2)}</span>}<i>Ver detalhes</i></div>
           <strong>{card.name}</strong>
           <small>{card.setName ?? "Abra para ver a coleção"}</small>
           <em>nº {card.localId ?? "—"}</em>

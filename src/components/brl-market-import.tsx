@@ -47,7 +47,7 @@ export function BrlMarketImport() {
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Falha ao importar cotações.");
-      setMessage(`✓ Sucesso! ${result.insertedObservations} nova(s) cotação(ões) BRL registrada(s). O Autopilot já pode usar estas referências.`);
+      setMessage(`✓ Sucesso! ${result.insertedObservations} nova(s) cotação(ões) BRL registrada(s). Consulte as referências no histórico de mercado.`);
       setPreview(null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Falha ao importar cotações.");
@@ -63,7 +63,7 @@ export function BrlMarketImport() {
         <div>
           <h2 style={{ fontSize: "1.1rem", margin: "0 0 4px 0" }}>Importar Cotações Nacionais em Reais (BRL)</h2>
           <p style={{ margin: 0, fontSize: "0.88rem", color: "var(--muted-foreground)", lineHeight: 1.5 }}>
-            Suba uma planilha CSV com preços de concorrentes ou listas de distribuidores. O GeekPrice utilizará essas cotações para sugerir os melhores preços no <strong>Autopilot</strong> sem nunca deixar você vender abaixo do custo com lucro.
+            Envie referências de preços da sua loja, de concorrentes ou distribuidores. Confira a prévia dos dados antes de salvar no histórico de mercado.
           </p>
         </div>
       </div>
