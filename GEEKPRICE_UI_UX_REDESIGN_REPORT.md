@@ -92,3 +92,19 @@ Foram reproduzidos e corrigidos os resultados da PkmnPrices com imagens maiores 
 Validação adicional: build de produção aprovado, TypeScript aprovado, lint dos arquivos alterados sem erros ou avisos, 28 arquivos / 122 testes aprovados e scripts visuais concluídos com exit code 0. Mercado, Produtos, Configurações, Plano, Equipe e Autopilot foram renderizados em desktop e celular na prévia estática, sem erros de JavaScript ou overflow da página. O modal do estoque também foi verificado em 390 pixels. Essa verificação continua sendo de apresentação e interação em ambiente sem banco, não um E2E transacional de produção.
 
 Novas capturas de demonstração: `market-results-desktop.png`, `market-results-mobile.png`, `market-stock-modal.png`, `market-price-detail.png`, `market-history.png` e capturas dos módulos revisados em `docs/ui-redesign/`.
+
+## Vitrine pública de marketing
+
+A página inicial passou a apresentar a marca e a plataforma, com GeekPrice como produto principal. A composição usa título editorial, cartas originais em destaque, efeitos de interação, apresentação da interface, benefícios, sequência de uso, área da plataforma, planos, FAQ e chamada final para cadastro.
+
+- `src/components/marketing-home.tsx` concentra a apresentação e as interações leves da página. `src/app/marketing.css` contém estilos com prefixo `mkt-`, separados dos módulos do aplicativo.
+- `src/app/page.tsx` preserva os redirecionamentos de sessão e onboarding e consulta o mesmo catálogo público. Somente os campos públicos necessários são enviados ao componente.
+- Planos, preços, limites, período de teste e recursos vêm do catálogo cadastrado. Produtos adicionais aparecem apenas quando retornados pelo catálogo público; a seleção de planos por software já está preparada.
+- Foram removidos indicadores fictícios de estoque, recomendações e tendências, além de afirmações de lucro garantido, preços em tempo real e certificações sem comprovação.
+- As duas capturas da interface em `public/marketing/` usam dados de demonstração e estão identificadas assim na vitrine. Não mostram dados comerciais do usuário. São servidas por `next/image`, com dimensões e `sizes` definidos e carregamento lazy.
+- O leque usa a arte original existente, sem requisições a APIs de cartas. A página tem menu mobile, alternância de capturas, FAQ nativo, link para pular ao conteúdo e preferência de movimento reduzido.
+- A animação de entrada das seções usa IntersectionObserver, sem biblioteca adicional. O conteúdo está presente no HTML; o movimento é um complemento visual.
+
+Verificação em prévia estática isolada, sem banco ou chamadas de API: larguras de 1920, 1366, 768, 390 e 360 pixels; navegação mobile; alternância de capturas; FAQ; catálogo sem planos; catálogo com mais de um software; ausência de erros de JavaScript e de overflow da página. O hover das cartas foi confirmado, todas as seções ficaram visíveis após rolagem e a preferência de movimento reduzido desativou as animações. As capturas estão em `docs/ui-redesign/marketing/`; os preços nelas são exemplos de teste, enquanto a aplicação lê os valores reais do catálogo.
+
+TypeScript, lint dos arquivos alterados e os 28 arquivos / 122 testes foram aprovados. O build de produção também foi executado para esta etapa. A publicação desta página não faz parte da validação visual local.

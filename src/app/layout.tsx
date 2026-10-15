@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./tcg-theme.css";
+import "./marketing.css";
 
 export const metadata: Metadata = {
   title: "GeekPrice — Inteligência para lojas geek",
