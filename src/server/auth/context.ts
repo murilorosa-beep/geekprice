@@ -83,6 +83,10 @@ export function authErrorResponse(error: unknown) {
   if (error instanceof AuthError) return Response.json({ error: error.message }, { status: error.status });
   if (error instanceof ZodError) return Response.json({ error: "Dados inválidos.", details: error.flatten().fieldErrors }, { status: 400 });
   if (error instanceof PlanLimitError) return Response.json({ error: error.message }, { status: 422 });
+  if (error instanceof Error && "status" in error && typeof (error as { status?: unknown }).status === "number") {
+    const status = (error as { status: number }).status;
+    return Response.json({ error: error.message }, { status: status === 404 ? 404 : 502 });
+  }
   console.error(error);
   return Response.json({ error: "Erro interno." }, { status: 500 });
 }

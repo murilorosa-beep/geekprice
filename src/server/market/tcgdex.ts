@@ -62,13 +62,37 @@ export const tcgdexConnector: CatalogConnector = {
     if (input.set) params.set("set.name", input.set);
     if (input.number) params.set("localId", input.number);
     params.set("pagination:itemsPerPage", String(Math.min(input.limit ?? 20, 50)));
-    const response = await fetchWithRetry(`https://api.tcgdex.net/v2/${lang(input.language)}/cards?${params}`);
-    const rows = z.array(summarySchema).parse(await response.json());
-    return rows.map((row) => ({ ...mapCard(row, input.language), rarity: null, setId: null, setName: null, finishes: [] }));
+    const languages = lang(input.language) === "en" ? ["en"] : [lang(input.language), "en"];
+    const results = await Promise.all(languages.map(async (language) => {
+      try {
+        const response = await fetchWithRetry(`https://api.tcgdex.net/v2/${language}/cards?${params}`);
+        const rows = z.array(summarySchema).parse(await response.json());
+        return rows.map((row) => ({ ...mapCard(row, language), rarity: null, setId: null, setName: null, finishes: [] }));
+      } catch (error) {
+        if (error instanceof ConnectorHttpError && error.status === 404) return [];
+        throw error;
+      }
+    }));
+    // Older printings are absent from some localized catalogs. Preserve the actual
+    // catalog language when supplementing results; never label English cards PT.
+    const byId = new Map<string, ExternalCard>();
+    for (const card of results.flat()) if (!byId.has(card.id)) byId.set(card.id, card);
+    return [...byId.values()].slice(0, input.limit ?? 30);
   },
   async getCard(id, language) {
-    const response = await fetchWithRetry(cardUrl(language, id));
+    let resolvedLanguage = lang(language);
+    let response: Response;
+    try {
+      response = await fetchWithRetry(cardUrl(resolvedLanguage, id));
+    } catch (error) {
+      if (error instanceof ConnectorHttpError && error.status === 404 && resolvedLanguage !== "en") {
+        resolvedLanguage = "en";
+        response = await fetchWithRetry(cardUrl(resolvedLanguage, id));
+      } else {
+        throw error;
+      }
+    }
     const raw = detailSchema.parse(await response.json());
-    return { ...mapCard(raw, language), prices: mapPrices(raw.pricing, raw.id) };
+    return { ...mapCard(raw, resolvedLanguage), prices: mapPrices(raw.pricing, raw.id) };
   },
 };

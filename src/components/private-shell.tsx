@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { signOut } from "next-auth/react";
 import { usePathname } from "next/navigation";
-import { Bell, Box, ChartNoAxesCombined, ChevronDown, CreditCard, LayoutDashboard, Layers, LibraryBig, Menu, Plug, Settings, Sparkles, Store, UserRound, X } from "lucide-react";
+import { Bell, BookOpen, Box, ChartNoAxesCombined, ChevronDown, CreditCard, Hammer, LayoutDashboard, Layers, LibraryBig, Menu, Plug, Settings, Sparkles, Store, UserRound, X } from "lucide-react";
 import type { MemberRole } from "@/server/auth/permissions";
 import { GeekMark } from "./tcg-art";
 
@@ -15,6 +15,8 @@ const items = [
   { href: "/market", label: "Mercado", icon: ChartNoAxesCombined },
   { href: "/recommendations", label: "Autopilot", icon: Sparkles },
   { href: "/alerts", label: "Alertas", icon: Bell },
+  { href: "/collections", label: "Coleções geek", icon: BookOpen },
+  { href: "/commissions", label: "Encomendas geek", icon: Hammer },
 ];
 
 export function PrivateShell({ userName, organizationName, role, children }: { userName: string; organizationName: string; role: MemberRole; children: React.ReactNode }) {

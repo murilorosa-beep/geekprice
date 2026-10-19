@@ -3,9 +3,12 @@
 
 import Link from "next/link";
 import { cardConditionLabel, cardFinishLabel, cardLanguageLabel } from "@/lib/card-display";
+import { IndexReferenceSummary } from "./index-reference-summary";
+import type { IndicativeMarketReference } from "@/lib/index-reference";
 import { useCallback, useEffect, useState } from "react";
 import { Link2, Search, Sparkles } from "lucide-react";
 import { BrazilianQuoteModal } from "@/components/brazilian-quote-modal";
+import { GeekPriceIndexStock } from "@/components/geekprice-index-stock";
 
 type Item = {
   id: string;
@@ -22,6 +25,7 @@ type Item = {
   desiredMarginPercent: number;
   currentPrice: number;
   marketPrice: number | null;
+  indicativeMarketReference?: IndicativeMarketReference | null;
   catalogSource: string | null;
   canonicalId: string | null;
   catalogLinked: boolean;
@@ -30,7 +34,7 @@ type Result = { items: Item[]; total: number; page: number; pageSize: number };
 const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const isPocketCard = (item: Item) => Boolean(item.imageUrl?.includes("/tcgp/"));
 
-export function MarketMyCards({ canManage, onSearchEdition }: { canManage: boolean; onSearchEdition: (item: Item) => void }) {
+export function MarketMyCards({ canManage, onSearchEdition, openIndexForId, onIndexOpened }: { canManage: boolean; onSearchEdition: (item: Item) => void; openIndexForId?: string | null; onIndexOpened?: () => void }) {
   const [result, setResult] = useState<Result>({ items: [], total: 0, page: 1, pageSize: 20 });
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -40,6 +44,8 @@ export function MarketMyCards({ canManage, onSearchEdition }: { canManage: boole
   const [feedback, setFeedback] = useState("");
   const [selected, setSelected] = useState<Item | null>(null);
   const [quoteModalItem, setQuoteModalItem] = useState<Item | null>(null);
+  const [indexItemId, setIndexItemId] = useState<string | null>(null);
+  const activeIndexItemId = openIndexForId ?? indexItemId;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -99,8 +105,9 @@ export function MarketMyCards({ canManage, onSearchEdition }: { canManage: boole
             <span className="market-my-identity"><strong>{item.name}</strong><small>{item.set ?? "Sem coleção"} · {item.code ?? "s/n"} · {cardLanguageLabel(item.language)} · {cardFinishLabel(item.finish)} · SKU {item.sku}</small><span className={item.catalogLinked ? "market-link-state linked" : "market-link-state"}>{item.catalogLinked ? "Edição oficial associada" : item.canonicalId ? "Edição identificada; falta associar" : "Edição não identificada"}</span><small className="market-my-detail-hint">Ver detalhes da carta →</small></span>
           </button>
           <div className="market-my-price"><span>Seu preço</span><strong>{money.format(item.currentPrice)}</strong></div>
-          <div className="market-my-price"><span>Referência BRL verificada (30 dias)</span><strong>{item.marketPrice == null ? "Sem cotação verificada" : money.format(item.marketPrice)}</strong>{difference != null && <small>{Math.abs(difference).toFixed(1)}% {difference < 0 ? "abaixo" : difference > 0 ? "acima" : "igual à referência"}</small>}</div>
+          <div className="market-my-price"><IndexReferenceSummary reference={item.indicativeMarketReference} currentPrice={item.currentPrice}/><span>Referência BRL verificada (30 dias)</span><strong>{item.marketPrice == null ? "Sem cotação verificada" : money.format(item.marketPrice)}</strong>{difference != null && <small>{Math.abs(difference).toFixed(1)}% {difference < 0 ? "abaixo" : difference > 0 ? "acima" : "igual à referência"}</small>}</div>
           <div className="market-my-action">
+            {!isPocketCard(item) && <button type="button" className="secondary small" onClick={() => setIndexItemId(item.id)}>Index BRL · sugerir preço</button>}
             {!isPocketCard(item) && <button
               type="button"
               className="secondary small"
@@ -132,6 +139,8 @@ export function MarketMyCards({ canManage, onSearchEdition }: { canManage: boole
       <div className="pagination"><span>Página {page} de {pages}</span><button type="button" disabled={page <= 1 || loading} onClick={() => setPage((value) => value - 1)}>Anterior</button><button type="button" disabled={page >= pages || loading} onClick={() => setPage((value) => value + 1)}>Próxima</button></div>
     </section>
     {selected && <div className="drawer-layer" onMouseDown={() => setSelected(null)}><section className="modal-card market-card-detail" role="dialog" aria-modal="true" aria-label={`Detalhes de ${selected.name}`} onMouseDown={(event) => event.stopPropagation()}><button type="button" className="drawer-close" onClick={() => setSelected(null)} aria-label="Fechar detalhes">×</button><p className="eyebrow">CARTA NO MEU ESTOQUE</p><div className="product-detail-hero">{selected.imageUrl && /^https:\/\//i.test(selected.imageUrl) ? <img className="product-art large" src={selected.imageUrl} alt={`Carta ${selected.name}`}/> : <span className="product-art-placeholder large">{selected.name.slice(0, 2).toUpperCase()}</span>}<div><h2>{selected.name}</h2><p className="muted">{selected.set ?? "Sem coleção"} · nº {selected.code ?? "não informado"}</p><span className={selected.catalogLinked ? "market-link-state linked" : "market-link-state"}>{selected.catalogLinked ? "Edição oficial associada" : "Aguardando associação da edição"}</span></div></div><div className="detail-grid"><div><span>SKU</span><strong>{selected.sku}</strong></div><div><span>Idioma / acabamento</span><strong>{cardLanguageLabel(selected.language)} · {cardFinishLabel(selected.finish)}</strong></div><div><span>Condição</span><strong>{cardConditionLabel(selected.condition)}</strong></div><div><span>Quantidade</span><strong>{selected.stock}</strong></div><div><span>Custo de aquisição</span><strong>{money.format(selected.cost)}</strong></div><div><span>Preço atual da loja</span><strong>{money.format(selected.currentPrice)}</strong></div><div><span>Margem desejada</span><strong>{selected.desiredMarginPercent}%</strong></div><div><span>Referência BRL verificada</span><strong>{selected.marketPrice == null ? "Sem cotação" : money.format(selected.marketPrice)}</strong></div></div>{selected.marketPrice == null && <p className="seller-review-warning">Sem cotação BRL verificada para a mesma condição e acabamento. Referências privadas ficam apenas no histórico.</p>}{isPocketCard(selected) && <p className="seller-review-warning">Esta carta é de Pokémon TCG Pocket. A PkmnPrices consulta cartas físicas e não fornece preço comparável para ela.</p>}<div className="seller-review-actions">{!isPocketCard(selected) && <button type="button" className="secondary" style={{ display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => setQuoteModalItem(selected)}><Sparkles size={15} style={{ color: "#10b981" }} /> Cotação BR</button>}{canManage && <Link href={`/products?edit=${selected.id}`} className="primary">Editar preço e estoque</Link>}<button type="button" className="secondary" onClick={() => setSelected(null)}>Fechar</button></div></section></div>}
+    {activeIndexItemId && <GeekPriceIndexStock itemId={activeIndexItemId} canManage={canManage}
+      onClose={() => { setIndexItemId(null); onIndexOpened?.(); }} onPriceChanged={load} />}
     {quoteModalItem && (
       <BrazilianQuoteModal
         cardName={quoteModalItem.name}

@@ -1,4 +1,6 @@
 import "server-only";
+import { attachIndexReferences, linkInventoryVariantToIndex } from "@/server/geekprice-index/references";
+import { attachPublicReferences } from "./public-references";
 import { and, asc, count, eq, gt, gte, ilike, inArray, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { externalListings, inventoryItems, priceObservations, products, productVariants, sources, subscriptions } from "@/db/schema";
@@ -40,7 +42,7 @@ export async function listInventory(organizationId: string, query: z.infer<typeo
     db.select({ value: count() }).from(inventoryItems).innerJoin(productVariants, eq(productVariants.id, inventoryItems.variantId))
       .innerJoin(products, eq(products.id, productVariants.productId)).where(where),
   ]);
-  return { items: rows.map((row) => ({ ...row, cost: Number(row.cost), currentPrice: Number(row.currentPrice), desiredMarginPercent: Number(row.desiredMarginPercent), marketPrice: row.marketPrice ? Number(row.marketPrice) : null, hasUnverifiedReference: Boolean(row.hasUnverifiedReference) })), total: totalResult[0]?.value ?? 0, page: query.page, pageSize: query.pageSize };
+  return { items: await attachPublicReferences(organizationId, await attachIndexReferences(organizationId, rows.map((row) => ({ ...row, cost: Number(row.cost), currentPrice: Number(row.currentPrice), desiredMarginPercent: Number(row.desiredMarginPercent), marketPrice: row.marketPrice ? Number(row.marketPrice) : null, hasUnverifiedReference: Boolean(row.hasUnverifiedReference) })))), total: totalResult[0]?.value ?? 0, page: query.page, pageSize: query.pageSize };
 }
 
 export async function listAllInventory(organizationId: string) {
@@ -77,7 +79,7 @@ export async function listAllInventory(organizationId: string) {
     hasUnverifiedReference: Boolean(row.hasUnverifiedReference),
   }));
 
-  return { items, total: items.length, page: 1, pageSize: items.length };
+  return { items: await attachPublicReferences(organizationId, await attachIndexReferences(organizationId, items)), total: items.length, page: 1, pageSize: items.length };
 }
 
 export async function listInventoryChunk(
@@ -121,6 +123,7 @@ export async function listInventoryChunk(
     .select({
       id: inventoryItems.id,
       name: products.name,
+      imageUrl: products.imageUrl,
       category: products.category,
       set: productVariants.setName,
       code: productVariants.collectorNumber,
@@ -145,14 +148,14 @@ export async function listInventoryChunk(
     .limit(options.limit)
     .offset(options.offset ?? 0);
 
-  return rows.map((row) => ({
+  return attachPublicReferences(organizationId, await attachIndexReferences(organizationId, rows.map((row) => ({
     ...row,
     cost: Number(row.cost),
     currentPrice: Number(row.currentPrice),
     desiredMarginPercent: Number(row.desiredMarginPercent),
     marketPrice: row.marketPrice ? Number(row.marketPrice) : null,
     hasUnverifiedReference: Boolean(row.hasUnverifiedReference),
-  }));
+  }))));
 }
 
 export async function createInventoryItem(organizationId: string, input: z.infer<typeof inventoryInputSchema>) {
@@ -188,6 +191,7 @@ export async function createInventoryItem(organizationId: string, input: z.infer
           .insert(productVariants)
           .values({
             productId: product.id,
+            catalogSource: input.catalogSource, canonicalId: input.canonicalId,
             sku: orgScopedSku,
             setName: input.setName || null,
             collectorNumber: input.collectorNumber || null,
@@ -236,6 +240,8 @@ export async function createInventoryItem(organizationId: string, input: z.infer
       })
       .returning();
 
+    const [saved] = await tx.select({ name: products.name, category: products.category, setName: productVariants.setName, collectorNumber: productVariants.collectorNumber, catalogSource: productVariants.catalogSource, canonicalId: productVariants.canonicalId }).from(productVariants).innerJoin(products, eq(products.id, productVariants.productId)).where(eq(productVariants.id, variantId));
+    await linkInventoryVariantToIndex(tx, organizationId, item.id, saved);
     return item;
   });
 }

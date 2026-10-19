@@ -20,6 +20,15 @@ describe("calculateRecommendation", () => {
     const result = calculateRecommendation({ cost: 100, feesPercent: 10, desiredMarginPercent: 20, currentPrice: 150, marketPrice: 0 });
     expect(result.safetyGate).toBe("missing_market_reference");
   });
+  it("bloqueia a automação para carta digital TCG Pocket", () => {
+    const result = calculateRecommendation({
+      cost: 15, feesPercent: 12, desiredMarginPercent: 30,
+      currentPrice: 23.9, marketPrice: null, unsupportedPocketMarket: true,
+    });
+    expect(result.safetyStatus).toBe("suspicious_flagged");
+    expect(result.safetyGate).toBe("unsupported_pocket_market");
+    expect(result.safetyReason).toContain("TCG Pocket");
+  });
   it("arredonda valores monetários em duas casas", () => {
     expect(calculateRecommendation({ cost: 10, feesPercent: 0, desiredMarginPercent: 30 }).minimumPrice).toBe(14.29);
   });

@@ -1,3 +1,4 @@
+import { IndexSupervisedRecommendations } from "@/components/index-supervised-recommendations";
 import { AutopilotView } from "@/components/autopilot-view";
 import { getPrivatePageContext } from "@/server/page-context";
 import {
@@ -15,11 +16,11 @@ export default async function RecommendationsPage() {
   ]);
 
   return (
-    <AutopilotView
+    <><IndexSupervisedRecommendations canManage={(actor.role === "owner" || actor.role === "admin") && actor.access !== "read_only"}/><AutopilotView
       canManagePrices={(actor.role === "owner" || actor.role === "admin") && actor.access !== "read_only"}
       initialQueue={initialQueue}
       initialRules={initialRules}
       initialBatches={initialBatches}
-    />
+    /></>
   );
 }

@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element -- Imagens dos catálogos externos associadas aos produtos. */
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -22,12 +22,17 @@ import type {
   AutopilotQueueResult,
   PricingRuleRecord,
 } from "@/server/autopilot/service";
+import { GeekPriceIndexStock } from "./geekprice-index-stock";
+import { BrazilianQuoteModal } from "./brazilian-quote-modal";
 
 const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+const isPocketItem = (item: AutopilotItemView) => Boolean(item.imageUrl?.includes("/tcgp/"));
 const canApply = (item: AutopilotItemView) => item.cost > 0 && item.currentPrice > 0 && item.suggestedPrice > 0 && (item.marketPrice ?? 0) > 0 && item.safetyGate !== "margin_below_minimum" && Math.abs(item.priceDifference) >= 0.01;
 const statusLabel = (item: AutopilotItemView) => {
   if (item.safetyGate === "missing_cost") return "Cadastre o custo";
   if (item.safetyGate === "missing_current_price") return "Cadastre o preço";
+  if (item.safetyGate === "unverified_market_reference") return "Cotação BRL · revisão manual";
+  if (item.safetyGate === "unsupported_pocket_market") return "TCG Pocket · sem mercado BRL";
   if (item.safetyGate === "missing_market_reference") return "Sem cotação BRL";
   if (item.safetyGate === "spike_threshold_exceeded") return "Variação alta";
   if (item.safetyGate === "margin_below_minimum") return "Margem abaixo do mínimo";
@@ -78,6 +83,32 @@ export function AutopilotView({
   const [toast, setToast] = useState<string | null>(null);
   const [actionError, setActionError] = useState("");
   const [reviewItem, setReviewItem] = useState<AutopilotItemView | null>(null);
+  const [indexStockItemId, setIndexStockItemId] = useState<string | null>(null);
+  const [quoteItem, setQuoteItem] = useState<AutopilotItemView | null>(null);
+  const channelRef = useRef(channel);
+  useEffect(() => { channelRef.current = channel; }, [channel]);
+
+  useEffect(() => {
+    let active = true;
+    let pending = false;
+    const update = async () => {
+      if (pending || document.visibilityState !== "visible") return;
+      pending = true;
+      const requestedChannel = channelRef.current;
+      try {
+        const response = await fetch(`/api/autopilot/queue?channel=${requestedChannel}`, { cache: "no-store" });
+        if (!response.ok) return;
+        const nextQueue: AutopilotQueueResult = await response.json();
+        if (active && channelRef.current === requestedChannel) setQueue(nextQueue);
+      } finally {
+        pending = false;
+      }
+    };
+    const timer = window.setInterval(() => { void update().catch(() => undefined); }, 60_000);
+    const onVisible = () => { void update().catch(() => undefined); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { active = false; window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); };
+  }, []);
 
   function showToast(msg: string) {
     setToast(msg);
@@ -440,7 +471,7 @@ export function AutopilotView({
 
           {/* Filtros e Busca */}
           {queue.stats.totalItems > 0 && queue.stats.safeCount === 0 && (
-            <div className="autopilot-help">Nenhum item está pronto para aplicação automática. Abra cada produto para ver o motivo. Custo ou preço zerado precisa ser corrigido em <Link href="/products">Produtos</Link>; referências ausentes podem ser vinculadas em <Link href="/market">Mercado</Link>.</div>
+            <div className="autopilot-help">Nenhum item está pronto para aplicação automática. {queue.flagged.some(isPocketItem) && "Cartas TCG Pocket não têm cotação BRL nas fontes físicas conectadas; os valores exibidos para elas são cálculos por custo. "}As cotações indicativas do Index BRL aparecem em “Precisam de atenção” com sugestão supervisionada. Custo ou preço zerado pode ser corrigido em <Link href="/products">Produtos</Link>; referências físicas ausentes podem ser vinculadas em <Link href="/market">Mercado</Link>.</div>
           )}
           <div className="filters" style={{ justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
@@ -558,7 +589,19 @@ export function AutopilotView({
                         <td>{money.format(item.currentPrice)}</td>
                         <td>
                           <strong className="seller-suggested">{money.format(item.suggestedPrice)}</strong>
-                          <span className="seller-delta">{item.marketPrice == null ? "Simulação por custo; não aplicável" : item.currentPrice <= 0 ? "Preço atual não cadastrado" : `${item.percentageChange >= 0 ? "+" : ""}${item.percentageChange.toFixed(1)}% em relação ao atual`}</span>
+                          <span className="seller-delta">
+                            {isPocketItem(item)
+                              ? "TCG Pocket: cálculo por custo, sem cotação de mercado"
+                              : item.marketPrice == null && !item.indicativeMarketReference && !item.publicMarketReference
+                              ? "Simulação por custo; não aplicável"
+                              : item.publicMarketReference && item.marketPrice == null && !item.indicativeMarketReference
+                                ? `Mercado BRL: ${money.format(item.publicMarketReference.price)} (${item.publicMarketReference.source}) · revisão manual`
+                              : item.indicativeMarketReference && item.marketPrice == null
+                                ? `Index BRL: ${money.format(item.indicativeMarketReference.price)} (${item.indicativeMarketReference.source}) · ${item.percentageChange >= 0 ? "+" : ""}${item.percentageChange.toFixed(1)}%`
+                                : item.currentPrice <= 0
+                                  ? "Preço atual não cadastrado"
+                                  : `${item.percentageChange >= 0 ? "+" : ""}${item.percentageChange.toFixed(1)}% em relação ao atual`}
+                          </span>
                         </td>
                         <td>
                           <span className={`safety-pill ${item.safetyStatus}`}>{statusLabel(item)}</span>
@@ -602,14 +645,35 @@ export function AutopilotView({
         <button type="button" className="drawer-close" onClick={() => setReviewItem(null)} aria-label="Fechar revisão">×</button>
         <p className="eyebrow">DECISÃO DE PREÇO · BALCÃO FÍSICO</p>
         <div className="seller-review-heading">{reviewItem.imageUrl && /^https:\/\//i.test(reviewItem.imageUrl) ? <img className="product-art large" src={reviewItem.imageUrl} alt={`Carta ${reviewItem.name}`}/> : <div className="product-art-placeholder large">{reviewItem.name.slice(0, 2).toUpperCase()}</div>}<div><h2>{reviewItem.name}</h2><p>{reviewItem.set ?? reviewItem.category} · SKU {reviewItem.sku}</p><span className={`safety-pill ${reviewItem.safetyStatus}`}>{statusLabel(reviewItem)}</span></div></div>
-        <div className="seller-review-prices"><div><span>Preço atual no estoque</span><strong>{money.format(reviewItem.currentPrice)}</strong></div><div><span>{reviewItem.marketPrice == null ? "Simulação por custo e margem" : "Sugestão com referência BRL"}</span><strong>{money.format(reviewItem.suggestedPrice)}</strong></div></div>
+        <div className="seller-review-prices"><div><span>Preço atual no estoque</span><strong>{money.format(reviewItem.currentPrice)}</strong></div><div><span>{reviewItem.marketPrice == null && !reviewItem.indicativeMarketReference && !reviewItem.publicMarketReference ? "Simulação por custo e margem" : reviewItem.marketPrice == null ? "Sugestão supervisionada (Mercado BRL)" : "Sugestão com referência BRL"}</span><strong>{money.format(reviewItem.suggestedPrice)}</strong></div></div>
         <p className="seller-review-reason">{reviewItem.safetyReason}</p>
-        <div className="seller-review-facts"><div><span>Custo de aquisição</span><strong>{money.format(reviewItem.cost)}</strong></div><div><span>Piso mínimo calculado</span><strong>{money.format(reviewItem.minimumPrice)}</strong></div><div><span>Referência BRL</span><strong>{reviewItem.marketPrice == null ? "Não disponível" : money.format(reviewItem.marketPrice)}</strong></div><div><span>Margem projetada</span><strong>{reviewItem.projectedMargin.toFixed(1)}%</strong></div></div>
-        {reviewItem.marketPrice == null ? <p className="seller-review-warning">Este valor é apenas uma simulação matemática. Sem cotação brasileira recente, o Autopilot não altera seu preço — mesmo com confirmação manual. Seu preço atual permanece como está.</p> : reviewItem.safetyStatus === "suspicious_flagged" && <p className="seller-review-warning">Esta sugestão exige revisão humana. Não será aplicada automaticamente.</p>}
-        <div className="seller-review-actions"><Link href="/products" className="secondary">Ver produtos</Link><Link href="/market" className="secondary">Ver mercado</Link>{reviewItem.marketPrice == null ? canManagePrices && <Link href={`/products?edit=${reviewItem.id}`} className="primary">Editar preço manualmente</Link> : <button type="button" className="primary" disabled={loading || !canManagePrices || channel !== "counter" || !canApply(reviewItem)} onClick={() => handleApplySingle(reviewItem.id)}>Alterar preço do estoque para {money.format(reviewItem.suggestedPrice)}</button>}</div>
+        <div className="seller-review-facts"><div><span>Custo de aquisição</span><strong>{money.format(reviewItem.cost)}</strong></div><div><span>Piso mínimo calculado</span><strong>{money.format(reviewItem.minimumPrice)}</strong></div><div><span>Referência BRL</span><strong>{reviewItem.marketPrice != null ? money.format(reviewItem.marketPrice) : reviewItem.indicativeMarketReference ? `${money.format(reviewItem.indicativeMarketReference.price)} (${reviewItem.indicativeMarketReference.source} · indicativa)` : reviewItem.publicMarketReference ? `${money.format(reviewItem.publicMarketReference.price)} (${reviewItem.publicMarketReference.source} · não homologada)` : "Não disponível"}</strong></div><div><span>Margem projetada</span><strong>{reviewItem.projectedMargin.toFixed(1)}%</strong></div></div>
+        {isPocketItem(reviewItem) ? <p className="seller-review-warning">TCG Pocket é digital. As fontes conectadas de cartas físicas não oferecem preço BRL comparável para esta carta. O valor calculado usa apenas custo, taxas e margem; ajuste o preço manualmente se necessário.</p> : reviewItem.marketPrice == null && !reviewItem.indicativeMarketReference && !reviewItem.publicMarketReference ? <p className="seller-review-warning">Este valor é apenas uma simulação matemática. Sem cotação brasileira recente, o Autopilot não altera seu preço. Seu preço atual permanece como está.</p> : reviewItem.safetyStatus === "suspicious_flagged" && <p className="seller-review-warning">Esta sugestão exige revisão humana. Não será aplicada automaticamente.</p>}
+        <div className="seller-review-actions"><Link href="/products" className="secondary">Ver produtos</Link>{!isPocketItem(reviewItem) && <button type="button" className="secondary" onClick={() => { setQuoteItem(reviewItem); setReviewItem(null); }}>Consultar cotação BRL</button>}{reviewItem.marketPrice == null && reviewItem.indicativeMarketReference ? <button type="button" className="primary" onClick={() => { setIndexStockItemId(reviewItem.id); setReviewItem(null); }}>Comparar e aprovar pelo Index BRL</button> : reviewItem.marketPrice == null ? canManagePrices && <Link href={`/products?edit=${reviewItem.id}`} className="primary">Editar preço manualmente</Link> : <button type="button" className="primary" disabled={loading || !canManagePrices || channel !== "counter" || !canApply(reviewItem)} onClick={() => handleApplySingle(reviewItem.id)}>Alterar preço do estoque para {money.format(reviewItem.suggestedPrice)}</button>}</div>
         {channel !== "counter" && <p className="muted">Loja virtual e marketplace estão em modo de simulação; nenhum preço é publicado nesses canais.</p>}
-        {!canApply(reviewItem) && channel === "counter" && <p className="muted">{reviewItem.marketPrice == null ? "Cadastre ou vincule uma referência BRL recente no Mercado para liberar uma sugestão aplicável. A referência internacional sozinha não libera alteração de preço." : "A aplicação fica disponível após corrigir os dados ou quando existir diferença real entre os preços."}</p>}
+        {!canApply(reviewItem) && channel === "counter" && !isPocketItem(reviewItem) && <p className="muted">{reviewItem.marketPrice == null && reviewItem.indicativeMarketReference ? "Use 'Comparar e aprovar pelo Index BRL' para confirmar variante (idioma, acabamento e condição) e aprovar com segurança." : reviewItem.marketPrice == null ? "Cadastre ou vincule uma referência BRL recente no Mercado para liberar uma sugestão aplicável. A referência internacional sozinha não libera alteração de preço." : "A aplicação fica disponível após corrigir os dados ou quando existir diferença real entre os preços."}</p>}
       </section></div>}
+      {indexStockItemId && (
+        <GeekPriceIndexStock
+          itemId={indexStockItemId}
+          canManage={canManagePrices}
+          onClose={() => setIndexStockItemId(null)}
+          onPriceChanged={async () => {
+            await refreshData();
+            router.refresh();
+          }}
+        />
+      )}
+      {quoteItem && <BrazilianQuoteModal
+        cardName={quoteItem.name}
+        edition={quoteItem.set}
+        collectorNumber={quoteItem.code}
+        game={/magic/i.test(quoteItem.category) ? "magic" : "pokemon"}
+        inventoryItemId={quoteItem.id}
+        inventoryItemName={quoteItem.name}
+        onClose={() => setQuoteItem(null)}
+        onQuoteSaved={() => { void refreshData(); }}
+      />}
 
       {/* TAB 2: REGRAS & ESTRATÉGIAS */}
       {activeTab === "rules" && (

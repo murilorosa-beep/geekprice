@@ -1,4 +1,5 @@
 import "server-only";
+import type { IndicativeMarketReference } from "@/lib/index-reference";
 import { createHash } from "node:crypto";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
@@ -16,12 +17,13 @@ export type RecommendationView = {
   cost: number;
   currentPrice: number;
   marketPrice: number | null;
+  indicativeMarketReference: IndicativeMarketReference | null;
   minimumPrice: number;
   suggestedPrice: number;
   estimatedMargin: number;
   difference: number;
   priority: number;
-  status: "below_minimum" | "below_market" | "above_market" | "no_market" | "competitive";
+  status: "indicative_reference" | "below_minimum" | "below_market" | "above_market" | "no_market" | "competitive";
   safetyStatus: "safe_auto" | "suspicious_flagged" | "unchanged";
   safetyFlag: string | null;
   channel: "counter" | "ecommerce" | "marketplace";
@@ -55,6 +57,7 @@ export async function refreshRecommendations(organizationId: string) {
   const pending: (typeof recommendations.$inferInsert)[] = [];
 
   for (const item of inventory.items) {
+    const isPocket = Boolean(item.imageUrl?.includes("/tcgp/"));
     const desiredMargin = Math.max(
       item.desiredMarginPercent,
       effective.minimumMarginPercent,
@@ -67,11 +70,13 @@ export async function refreshRecommendations(organizationId: string) {
       desiredMarginPercent: desiredMargin,
       minimumMarginPercent: effective.minimumMarginPercent,
       marketDiscountPercent: effective.marketDiscountPercent,
-      marketPrice: item.marketPrice,
+      marketPrice: isPocket ? null : item.marketPrice ?? (item.indicativeMarketReference?.stale ? null : item.indicativeMarketReference?.price) ?? item.publicMarketReference?.price ?? null,
+      hasUnverifiedMarketReference: Boolean(item.hasUnverifiedReference || item.indicativeMarketReference || item.publicMarketReference),
+      unsupportedPocketMarket: isPocket,
       currentPrice: item.currentPrice,
       maxChangePercent: 15,
       roundingMode: "ends_90" as const,
-      hasUnverifiedMarketReference: Boolean(item.hasUnverifiedReference),
+
     };
     const result = calculateRecommendation(parameters);
     const inputHash = createHash("sha256").update(JSON.stringify(parameters)).digest("hex");
@@ -83,7 +88,7 @@ export async function refreshRecommendations(organizationId: string) {
       channel: "counter",
       suggestedPrice: result.suggestedPrice.toFixed(2),
       minimumPrice: result.minimumPrice.toFixed(2),
-      marketPrice: item.marketPrice?.toFixed(2) ?? null,
+      marketPrice: parameters.marketPrice?.toFixed(2) ?? null,
       safetyStatus: result.safetyStatus,
       safetyFlag: result.safetyFlag,
       roundingMode: "ends_90",
@@ -110,6 +115,7 @@ export async function listRecommendations(organizationId: string): Promise<Recom
   };
 
   return inventory.items.map((item) => {
+    const isPocket = Boolean(item.imageUrl?.includes("/tcgp/"));
     const desiredMargin = Math.max(
       item.desiredMarginPercent,
       effective.minimumMarginPercent,
@@ -122,7 +128,9 @@ export async function listRecommendations(organizationId: string): Promise<Recom
       desiredMarginPercent: desiredMargin,
       minimumMarginPercent: effective.minimumMarginPercent,
       marketDiscountPercent: effective.marketDiscountPercent,
-      marketPrice: item.marketPrice,
+      marketPrice: isPocket ? null : item.marketPrice ?? (item.indicativeMarketReference?.stale ? null : item.indicativeMarketReference?.price) ?? item.publicMarketReference?.price ?? null,
+      hasUnverifiedMarketReference: Boolean(item.hasUnverifiedReference || item.indicativeMarketReference || item.publicMarketReference),
+      unsupportedPocketMarket: isPocket,
       currentPrice: item.currentPrice,
       maxChangePercent: 15,
       roundingMode: "ends_90",
@@ -132,8 +140,10 @@ export async function listRecommendations(organizationId: string): Promise<Recom
     const suggestedPrice = calculated.suggestedPrice;
     const difference = calculated.priceDifference;
     const status: RecommendationView["status"] =
-      item.currentPrice < minimumPrice
+      isPocket ? "no_market" : item.currentPrice < minimumPrice
         ? "below_minimum"
+        : item.indicativeMarketReference && !item.marketPrice
+          ? "indicative_reference"
         : item.marketPrice == null
           ? "no_market"
           : item.currentPrice < item.marketPrice * 0.95
@@ -158,7 +168,8 @@ export async function listRecommendations(organizationId: string): Promise<Recom
       category: item.category,
       cost: item.cost,
       currentPrice: item.currentPrice,
-      marketPrice: item.marketPrice,
+      marketPrice: isPocket ? null : item.marketPrice,
+      indicativeMarketReference: isPocket ? null : item.indicativeMarketReference,
       minimumPrice,
       suggestedPrice,
       estimatedMargin: calculated.projectedMargin,
@@ -169,7 +180,7 @@ export async function listRecommendations(organizationId: string): Promise<Recom
       safetyFlag: calculated.safetyFlag,
       channel: "counter",
       roundingMode: "ends_90",
-      explanation: calculated.safetyReason,
+      explanation: !isPocket && item.indicativeMarketReference ? "Referência indicativa do GeekPrice Index: condição, idioma e acabamento podem diferir; exige revisão e aprovação individual. " + calculated.safetyReason : calculated.safetyReason,
       createdAt: row?.createdAt ?? new Date(0),
     };
   });

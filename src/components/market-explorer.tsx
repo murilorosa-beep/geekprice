@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { MarketMyCards } from "@/components/market-my-cards";
+import { GeekPriceIndexExplorer } from "@/components/geekprice-index-explorer";
 import { BrlMarketImport } from "@/components/brl-market-import";
 import { SmartRegistrationModal } from "@/components/smart-registration-modal";
 import { BrazilianQuoteModal } from "@/components/brazilian-quote-modal";
@@ -72,8 +73,9 @@ type Group = {
 };
 
 export function MarketExplorer({ canManage, pkmnPricesAvailable = false }: { canManage: boolean; pkmnPricesAvailable?: boolean }) {
-  const [activeTab, setActiveTab] = useState<"mine" | "catalog" | "physical">("mine");
+  const [activeTab, setActiveTab] = useState<"mine" | "index" | "catalog" | "physical">("mine");
   const [registerCard, setRegisterCard] = useState<{ id: string; language: string } | null>(null);
+  const [newInventoryId, setNewInventoryId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [collection, setCollection] = useState("");
   const [number, setNumber] = useState("");
@@ -134,7 +136,7 @@ export function MarketExplorer({ canManage, pkmnPricesAvailable = false }: { can
 
   async function select(c: Card) {
     setLoading(true);
-    const r = await fetch(`/api/market/catalog/${encodeURIComponent(c.id)}?language=${language}`);
+    const r = await fetch(`/api/market/catalog/${encodeURIComponent(c.id)}?language=${encodeURIComponent(c.language || language)}`);
     const b = await r.json();
     setLoading(false);
     if (!r.ok) return setError(b.error ?? "Falha ao carregar a carta.");
@@ -178,22 +180,24 @@ export function MarketExplorer({ canManage, pkmnPricesAvailable = false }: { can
       {registerCard && <SmartRegistrationModal
         initialCard={registerCard}
         onClose={() => setRegisterCard(null)}
-        onCreated={async () => {
+        onCreated={async (inventoryItemId) => {
           const response = await fetch("/api/inventory?pageSize=100");
           const body = await response.json();
           if (response.ok) setStock(body.items ?? []);
           await loadMarket();
           setActiveTab("mine");
-          setFeedback("Carta adicionada ao estoque com a edição escolhida. Confira seus detalhes e preço em Minhas cartas.");
+          setNewInventoryId(inventoryItemId);
+          setFeedback("Carta adicionada ao estoque. O Index procurará a impressão correspondente para comparar preços.");
         }}
       />}
 
       <div className="market-tabs" role="tablist" aria-label="Mercado">
         <button type="button" role="tab" aria-selected={activeTab === "mine"} className={activeTab === "mine" ? "active" : ""} onClick={() => setActiveTab("mine")}>Minhas cartas e preços</button>
+        <button type="button" role="tab" aria-selected={activeTab === "index"} className={activeTab === "index" ? "active" : ""} onClick={() => setActiveTab("index")}>Index BRL</button>
         <button type="button" role="tab" aria-selected={activeTab === "catalog"} className={activeTab === "catalog" ? "active" : ""} onClick={() => setActiveTab("catalog")}>Buscar edição no catálogo</button>
         {pkmnPricesAvailable && <button type="button" role="tab" aria-selected={activeTab === "physical"} className={activeTab === "physical" ? "active" : ""} onClick={() => setActiveTab("physical")}>Pokémon físico · preços USD</button>}
       </div>
-      {activeTab === "mine" ? <MarketMyCards canManage={canManage} onSearchEdition={(item) => { setStockId(item.id); setStock((current) => current.some((stockItem) => stockItem.id === item.id) ? current : [...current, { id: item.id, name: item.name, sku: item.sku, set: item.set }]); setName(item.name); setCollection(item.set ?? ""); setNumber(item.code ?? ""); setLanguage(item.language.toLowerCase()); setActiveTab("catalog"); setShowGuide(false); }}/> : activeTab === "physical" ? <PkmnPricesLookup /> : <>
+      {activeTab === "mine" ? <MarketMyCards canManage={canManage} openIndexForId={newInventoryId} onIndexOpened={() => setNewInventoryId(null)} onSearchEdition={(item) => { setStockId(item.id); setStock((current) => current.some((stockItem) => stockItem.id === item.id) ? current : [...current, { id: item.id, name: item.name, sku: item.sku, set: item.set }]); setName(item.name); setCollection(item.set ?? ""); setNumber(item.code ?? ""); setLanguage(item.language.toLowerCase()); setActiveTab("catalog"); setShowGuide(false); }}/> : activeTab === "index" ? <GeekPriceIndexExplorer /> : activeTab === "physical" ? <PkmnPricesLookup /> : <>
 
       {!showGuide && <div className="market-guide-summary"><HelpCircle size={18}/><span><strong>Para produtos manuais:</strong> encontre a edição exata, vincule ao estoque e veja as referências disponíveis. Referências em USD/EUR não liberam mudança de preço.</span><button type="button" className="secondary small" onClick={() => setShowGuide(true)}>Ver passo a passo</button></div>}
       {/* GUIA EXPLICATIVO PARA O LOJISTA */}

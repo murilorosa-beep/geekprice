@@ -15,6 +15,8 @@ import {
   type PriceRoundingMode,
   type PriceSafetyStatus,
 } from "@/lib/pricing";
+import type { IndicativeMarketReference } from "@/lib/index-reference";
+import type { PublicMarketReference } from "@/server/inventory/public-references";
 import { listAllInventory } from "@/server/inventory/service";
 import { getActivePricingPolicy } from "@/server/settings/service";
 import type { z } from "zod";
@@ -50,6 +52,8 @@ export type AutopilotItemView = {
   cost: number;
   currentPrice: number;
   marketPrice: number | null;
+  indicativeMarketReference?: IndicativeMarketReference | null;
+  publicMarketReference?: PublicMarketReference | null;
   minimumPrice: number;
   suggestedPrice: number;
   rawSuggestedPrice: number;
@@ -261,6 +265,8 @@ export function evaluateAutopilotItemChunk(
     cost: number;
     currentPrice: number;
     marketPrice: number | null;
+    indicativeMarketReference?: IndicativeMarketReference | null;
+    publicMarketReference?: PublicMarketReference | null;
     desiredMarginPercent: number;
     stock: number;
     hasUnverifiedReference?: boolean;
@@ -276,6 +282,7 @@ export function evaluateAutopilotItemChunk(
   let marginSum = 0;
 
   for (const item of items) {
+    const isPocket = Boolean(item.imageUrl?.includes("/tcgp/"));
     const matchedRule = matchRuleForItem(rules, item, channel);
 
     const feePercent = matchedRule ? Number(matchedRule.feePercent) : defaultPolicy.feePercent;
@@ -296,6 +303,12 @@ export function evaluateAutopilotItemChunk(
       ? (matchedRule.roundingMode as PriceRoundingMode)
       : "ends_90";
 
+    const indicativePrice =
+      item.marketPrice == null && item.indicativeMarketReference && !item.indicativeMarketReference.stale
+        ? item.indicativeMarketReference.price
+        : null;
+    const effectiveMarketPrice = isPocket ? null : item.marketPrice ?? indicativePrice ?? item.publicMarketReference?.price ?? null;
+
     const calc = calculateRecommendation({
       cost: item.cost,
       feesPercent: feePercent,
@@ -303,11 +316,12 @@ export function evaluateAutopilotItemChunk(
       desiredMarginPercent,
       minimumMarginPercent,
       marketDiscountPercent,
-      marketPrice: item.marketPrice,
+      marketPrice: effectiveMarketPrice,
       currentPrice: item.currentPrice,
       maxChangePercent,
       roundingMode,
-      hasUnverifiedMarketReference: Boolean(item.hasUnverifiedReference),
+      hasUnverifiedMarketReference: Boolean(item.hasUnverifiedReference || indicativePrice != null || item.publicMarketReference),
+      unsupportedPocketMarket: isPocket,
     });
 
     const itemView: AutopilotItemView = {
@@ -322,7 +336,9 @@ export function evaluateAutopilotItemChunk(
       rarity: item.rarity ?? null,
       cost: item.cost,
       currentPrice: item.currentPrice,
-      marketPrice: item.marketPrice,
+      marketPrice: isPocket ? null : item.marketPrice,
+      indicativeMarketReference: isPocket ? null : item.indicativeMarketReference ?? null,
+      publicMarketReference: isPocket ? null : item.publicMarketReference ?? null,
       minimumPrice: calc.minimumPrice,
       suggestedPrice: calc.suggestedPrice,
       rawSuggestedPrice: calc.rawSuggestedPrice,

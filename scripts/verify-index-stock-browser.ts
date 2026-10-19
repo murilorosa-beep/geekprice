@@ -1,0 +1,110 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { chromium, expect as baseExpect } from "@playwright/test";
+import { encode } from "next-auth/jwt";
+import { eq, sql } from "drizzle-orm";
+import { z } from "zod";
+import { db } from "../src/db";
+import { inventoryItems, memberships, organizations, products, productVariants, users, indexInventoryLinks } from "../src/db/schema";
+import { assertIsolatedIndexDatabase } from "./index-isolated-db";
+
+const expect = baseExpect.configure({ timeout: 30_000 });
+
+async function main() {
+  const target = assertIsolatedIndexDatabase();
+  const base = process.env.INDEX_TEST_BASE_URL;
+  const secret = process.env.NEXTAUTH_SECRET;
+  assert.ok(base && /^http:\/\/127\.0\.0\.1:\d+$/.test(base) && secret);
+  assert.equal((await db.execute(sql`select current_database() as name`))[0].name, target.database);
+  const nonce = randomUUID();
+  const [org] = await db.insert(organizations).values({ name: "Stock Browser Test", slug: `stock-browser-${nonce}`, onboardingCompletedAt: new Date() }).returning();
+  const [user] = await db.insert(users).values({ name: "Browser Test", email: `${nonce}@localhost.test`, passwordHash: "test-only", emailVerifiedAt: new Date() }).returning();
+  let productId: string | null = null;
+  const browser = await chromium.launch({ headless: true, executablePath: resolve(".tools/playwright/chromium_headless_shell-1248/chrome-headless-shell-win64/chrome-headless-shell.exe") });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
+  page.setDefaultTimeout(60_000);
+  try {
+    await db.insert(memberships).values({ organizationId: org.id, userId: user.id, role: "admin" });
+    const token = await encode({ secret, token: { userId: user.id, organizationId: org.id, role: "admin", authVersion: 0 }, maxAge: 1800 });
+    await page.context().addCookies([{ name: "next-auth.session-token", value: token, url: base }]);
+    await page.goto(`${base}/catalog`);
+    await page.getByLabel("Nome da carta", { exact: true }).fill("Charizard");
+    await page.getByLabel("Número", { exact: true }).fill("4");
+    await page.getByRole("button", { name: "Consultar cartas" }).click();
+    const candidate = page.locator(".catalog-card").filter({ hasText: /base1-4$/ }).first();
+    await candidate.click();
+    await expect(page.locator(".catalog-detail")).toContainText(/Coleção Básica|Base Set/);
+    await page.getByLabel("SKU da loja").fill(`browser-${nonce}`);
+    await page.getByLabel("Custo (R$)", { exact: true }).fill("2500");
+    await page.getByLabel("Preço atual (R$)", { exact: true }).fill("5000");
+    const createdResponse = page.waitForResponse((response) => response.url().includes("/api/smart-registration/card") && response.request().method() === "POST");
+    await page.getByRole("button", { name: "Adicionar ao estoque", exact: true }).click();
+    const response = await createdResponse;
+    assert.equal(response.status(), 201, await response.text());
+    const created = z.object({ inventory: z.object({ id: z.string().uuid(), variantId: z.string().uuid() }) }).parse(await response.json());
+    const [variant] = await db.select().from(productVariants).where(eq(productVariants.id, created.inventory.variantId));
+    productId = variant.productId;
+    assert.equal(variant.canonicalId, "base1-4");
+    assert.equal(variant.catalogSource, "tcgdex");
+    const [link] = await db.select().from(indexInventoryLinks).where(eq(indexInventoryLinks.inventoryItemId, created.inventory.id));
+    assert.ok(link);
+    await page.goto(`${base}/products`);
+    await expect(page.locator("table")).toContainText("R$ 5.180,43");
+    await page.reload();
+    await expect(page.locator("table")).toContainText("R$ 5.180,43");
+    await page.getByRole("button", { name: "Ver detalhes de Charizard", exact: true }).click();
+    await expect(page.locator(".modal-card").first()).toContainText("MYP Cards");
+    await page.getByRole("button", { name: "Comparar e sugerir preço" }).click();
+    const drawer = page.getByRole("dialog", { name: "GeekPrice Index e sugestão de preço" });
+    await expect(drawer).toContainText("R$ 5.180,43");
+    await expect(drawer).toContainText("R$ 5.024,90");
+    await expect(drawer).toContainText("R$ 3.676,48");
+    await page.screenshot({ path: resolve(".tools/index-stock-before-approval.png"), fullPage: true });
+    await drawer.getByRole("checkbox").check();
+    await drawer.getByRole("button", { name: "Aprovar preço manualmente" }).click();
+    await expect(drawer).toContainText("Preço atualizado para");
+    let [saved] = await db.select().from(inventoryItems).where(eq(inventoryItems.id, created.inventory.id));
+    assert.equal(saved.price, "5024.90");
+    await page.reload();
+    await expect(page.locator("table")).toContainText("R$ 5.024,90");
+    await page.getByRole("button", { name: "Ver detalhes de Charizard", exact: true }).click();
+    await page.getByRole("button", { name: "Comparar e sugerir preço" }).click();
+    await expect(drawer).toContainText("Histórico e rollback");
+    await drawer.getByRole("button", { name: "Reverter", exact: true }).click();
+    await expect(drawer).toContainText("Preço anterior restaurado");
+    [saved] = await db.select().from(inventoryItems).where(eq(inventoryItems.id, created.inventory.id));
+    assert.equal(saved.price, "5000.00");
+    await page.screenshot({ path: resolve(".tools/index-stock-after-rollback.png"), fullPage: true });
+    await page.goto(`${base}/recommendations`);
+    const supervised = page.getByRole("region", { name: "Recomendações supervisionadas do Index" });
+    await expect(supervised).toContainText("R$ 5.024,90");
+    await expect(supervised).toContainText("R$ 5.180,43");
+    const autopilotQueue = page.locator(".seller-queue table");
+    await expect(autopilotQueue).toContainText("R$ 5.024,90");
+    await expect(autopilotQueue).toContainText("Index BRL: R$ 5.180,43");
+    await expect(autopilotQueue).toContainText("Index BRL · revisão manual");
+    await page.screenshot({ path: resolve(".tools/index-supervised-recommendations.png"), fullPage: true });
+    await page.goto(`${base}/market`);
+    await page.getByRole("tab", { name: "Minhas cartas e preços" }).click();
+    await expect(page.getByText("Index BRL: R$ 5.180,43", { exact: true })).toBeVisible();
+    const result = { target, catalog: "TCGdex live", canonicalId: variant.canonicalId, referenceBrl: 5180.43, suggestedPrice: 5024.9,
+      minimumPrice: 3676.48, autoLinked: true, reloaded: true, approvedInBrowser: true, persistedPostgres: true, history: true, rollbackInBrowser: true, recommendations: true, autopilotQueueBrl: true, market: true };
+    writeFileSync(resolve(".tools/index-stock-browser-result.json"), JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(result));
+  } catch (error) {
+    await page.screenshot({ path: resolve(".tools/index-stock-browser-failure.png"), fullPage: true });
+    console.error((await page.locator("body").innerText()).slice(-5000));
+    throw error;
+  } finally {
+    await browser.close();
+    // Capture any item created before a UI assertion failed, then remove only this fixture.
+    const owned = await db.select({ productId: productVariants.productId }).from(inventoryItems).innerJoin(productVariants, eq(productVariants.id, inventoryItems.variantId)).where(eq(inventoryItems.organizationId, org.id));
+    await db.delete(organizations).where(eq(organizations.id, org.id));
+    await db.delete(users).where(eq(users.id, user.id));
+    for (const item of owned) await db.delete(products).where(eq(products.id, item.productId));
+    if (productId && !owned.some((item) => item.productId === productId)) await db.delete(products).where(eq(products.id, productId));
+  }
+}
+main().then(() => process.exit(0)).catch((error) => { console.error(error); process.exit(1); });

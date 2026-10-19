@@ -2,6 +2,7 @@ import { z } from "zod";
 
 const money = z.coerce.number().finite().min(0).max(99_999_999.99).transform((value) => value.toFixed(2));
 export const inventoryInputSchema = z.object({
+  catalogSource: z.enum(["tcgdex", "scryfall"]).optional(), canonicalId: z.string().trim().min(1).max(180).optional(),
   name: z.string().trim().min(2).max(240), category: z.string().trim().min(2).max(80),
   sku: z.string().trim().min(1).max(120), setName: z.string().trim().max(180).optional().default(""),
   collectorNumber: z.string().trim().max(60).optional().default(""), language: z.string().trim().max(12).default("pt-BR"),

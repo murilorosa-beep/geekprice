@@ -102,7 +102,7 @@ export function MultigameCatalog() {
     setError("");
     try {
       const url = game === "pokemon"
-        ? `/api/market/catalog/${encodeURIComponent(card.id)}?language=pt-br`
+        ? `/api/market/catalog/${encodeURIComponent(card.id)}?language=${encodeURIComponent(card.language)}`
         : `/api/catalog/cards/magic/${encodeURIComponent(card.id)}`;
       const response = await fetch(url);
       const detail = await response.json();
@@ -130,7 +130,7 @@ export function MultigameCatalog() {
         body: JSON.stringify({
           ...form,
           externalCardId: selected.id,
-          language: game === "magic" ? "en" : "pt-br",
+          language: selected.language,
           quantity: Number(form.quantity),
         }),
       });
@@ -196,13 +196,15 @@ export function MultigameCatalog() {
         {cards.map((card) => <button className="catalog-card" key={card.id} onClick={() => choose(card)}>
           <div className="catalog-card-image">{card.image ? <img src={card.image} alt="" loading="lazy"/> : <span>{card.name.slice(0, 2)}</span>}<i>Ver detalhes</i></div>
           <strong>{card.name}</strong>
+          {card.image?.includes("/tcgp/") && <small>TCG Pocket · carta digital sem cotação BRL nesta fonte</small>}
           <small>{card.setName ?? "Abra para ver a coleção"}</small>
-          <em>nº {card.localId ?? "—"}</em>
+          <em>nº {card.localId ?? "—"} · {card.language.toUpperCase()} · {card.id}</em>
         </button>)}
       </div>
     </section>}
 
     {selected && <section className="panel catalog-detail">
+      {selected.image?.includes("/tcgp/") && <div className="autopilot-help">Esta impressão é do Pokémon TCG Pocket, um catálogo digital. As fontes de preço conectadas nesta loja cobrem cartas físicas; este cadastro não receberá cotação BRL nem alteração automática pelo Autopilot.</div>}
       <div className="catalog-detail-product">
         <div className="catalog-detail-image">{selected.image ? <img src={selected.image} alt=""/> : <span>{selected.name.slice(0, 2)}</span>}</div>
         <div className="catalog-detail-copy">

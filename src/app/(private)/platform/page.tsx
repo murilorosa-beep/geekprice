@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, Clock, Layers, Lock, Sparkles } from "lucide-react";
+import { ArrowRight, BookOpen, CheckCircle2, Hammer, Lock, Sparkles } from "lucide-react";
 import { getPrivatePageContext } from "@/server/page-context";
 import { listOrganizationSoftware } from "@/server/platform/service";
 
@@ -79,38 +79,11 @@ export default async function PlatformOverviewPage() {
           );
         })}
 
-        {/* Roadmap / Teaser Card */}
-        <article className="panel software-card software-card-upcoming">
-          <div className="software-card-header">
-            <div className="software-icon upcoming">
-              <Layers size={24} />
-            </div>
-            <div>
-              <span className="status-pill status-neutral">Em breve na vitrine</span>
-              <h2>Novos Softwares no Roadmap</h2>
-            </div>
-          </div>
-          <p className="software-description">
-            Estamos desenvolvendo novos módulos integrados para o seu negócio: Frente de Caixa (GeekPDV),
-            Business Intelligence avançado (GeekAnalytics) e Integrações multicanal com marketplaces.
-          </p>
-          <ul className="software-feature-list">
-            <li>
-              <Clock size={16} />
-              <span>GeekPDV — Ponto de venda ágil para balcão</span>
-            </li>
-            <li>
-              <Clock size={16} />
-              <span>GeekAnalytics — Métricas preditivas de giro</span>
-            </li>
-          </ul>
-          <div className="software-card-footer">
-            <Link href="/" className="secondary full">
-              Ver Vitrine Pública e Planos
-            </Link>
-          </div>
-        </article>
       </div>
+      <section className="gw-platform-modules"><h2>Mais ferramentas no seu acesso</h2><p>Coleções e encomendas estão incluídas no acesso atual da organização, respeitando o estado da assinatura. Primeira versão para testar com seus próprios projetos.</p><div className="platform-grid">
+        <article className="panel gw-platform-module"><BookOpen size={28}/><h3>Coleções geek</h3><p>Organize mangás, HQs, figures, jogos e cartas autorais. Acompanhe desejos, compras pendentes e empréstimos.</p><Link className="primary" href={actor.access === "blocked" ? "/billing" : "/collections"}>Abrir coleções <ArrowRight size={16}/></Link></article>
+        <article className="panel gw-platform-module"><Hammer size={28}/><h3>Encomendas geek</h3><p>Monte orçamentos com materiais e mão de obra. Acompanhe clientes, produção, prazos e valores recebidos.</p><Link className="primary" href={actor.access === "blocked" ? "/billing" : "/commissions"}>Abrir encomendas <ArrowRight size={16}/></Link></article>
+      </div></section>
     </div>
   );
 }

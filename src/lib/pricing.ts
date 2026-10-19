@@ -15,7 +15,8 @@ export type SafetyGate =
   | "spike_threshold_exceeded"
   | "margin_below_minimum"
   | "missing_market_reference"
-  | "unverified_market_reference";
+  | "unverified_market_reference"
+  | "unsupported_pocket_market";
 
 export type PricingInput = {
   cost: number;
@@ -30,6 +31,7 @@ export type PricingInput = {
   maxChangePercent?: number;
   roundingMode?: PriceRoundingMode;
   hasUnverifiedMarketReference?: boolean;
+  unsupportedPocketMarket?: boolean;
 };
 
 export type PricingResult = {
@@ -175,6 +177,11 @@ export function calculateRecommendation(input: PricingInput): PricingResult {
     safetyStatus = "suspicious_flagged";
     safetyGate = "missing_cost";
     safetyFlag = "Informe o custo de aquisição do produto antes de usar uma sugestão de preço.";
+    safetyReason = safetyFlag;
+  } else if (input.unsupportedPocketMarket) {
+    safetyStatus = "suspicious_flagged";
+    safetyGate = "unsupported_pocket_market";
+    safetyFlag = "Carta digital TCG Pocket: as fontes de preço de cartas físicas não fornecem cotação BRL comparável para esta variante.";
     safetyReason = safetyFlag;
   } else if (input.hasUnverifiedMarketReference) {
     safetyStatus = "suspicious_flagged";

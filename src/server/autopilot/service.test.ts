@@ -1,11 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
+  evaluateAutopilotItemChunk,
   isRuleEligibleForAutoApply,
   matchRuleForItem,
   type PricingRuleRecord,
 } from "./service";
 
 describe("Autopilot Rule Matcher", () => {
+  it("reconhece TCG Pocket e não libera preço de carta física", () => {
+    const result = evaluateAutopilotItemChunk([{
+      id: "pocket-1", name: "Charizard ex", imageUrl: "https://assets.tcgdex.net/pt/tcgp/A2b/010/high.webp",
+      category: "Pokémon TCG", sku: "SKU-1", cost: 15, currentPrice: 23.9,
+      marketPrice: 100, desiredMarginPercent: 30, stock: 5,
+    }], [], { feePercent: 12, additionalCostPercent: 0, minimumMarginPercent: 20, desiredMarginPercent: 25, marketDiscountPercent: 3 });
+    expect(result.safe).toHaveLength(0);
+    expect(result.flagged[0].safetyGate).toBe("unsupported_pocket_market");
+    expect(result.flagged[0].marketPrice).toBeNull();
+  });
   const baseRule: PricingRuleRecord = {
     id: "rule-1",
     organizationId: "org-1",

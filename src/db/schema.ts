@@ -1,4 +1,5 @@
 import { relations, sql } from "drizzle-orm";
+import type { CollectionInput, CommissionInput } from "../lib/geek-workspace";
 import {
   boolean, check, foreignKey, index, integer, jsonb, numeric, pgEnum, pgTable,
   primaryKey, text, timestamp, uniqueIndex, uuid, varchar,
@@ -23,6 +24,8 @@ const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 };
+
+export type CommissionMaterial = { name: string; quantity: number; unitCost: string };
 
 export const organizations = pgTable("organizations", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -101,6 +104,59 @@ export const memberships = pgTable("memberships", {
 }, (table) => [
   primaryKey({ columns: [table.organizationId, table.userId] }),
   index("memberships_user_idx").on(table.userId),
+]).enableRLS();
+
+export const geekCollectionItems = pgTable("geek_collection_items", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").references(() => organizations.id, { onDelete: "cascade" }).notNull(),
+  title: varchar("title", { length: 240 }).notNull(),
+  category: varchar("category", { length: 24 }).$type<CollectionInput["category"]>().notNull(),
+  series: varchar("series", { length: 180 }).default("").notNull(),
+  edition: varchar("edition", { length: 100 }).default("").notNull(),
+  status: varchar("status", { length: 24 }).$type<CollectionInput["status"]>().default("owned").notNull(),
+  quantity: integer("quantity").default(1).notNull(),
+  purchasePrice: numeric("purchase_price", { precision: 12, scale: 2 }).default("0").notNull(),
+  purchasedAt: varchar("purchased_at", { length: 10 }).default("").notNull(),
+  imageUrl: text("image_url").default("").notNull(),
+  location: varchar("location", { length: 180 }).default("").notNull(),
+  borrower: varchar("borrower", { length: 160 }).default("").notNull(),
+  loanDueAt: varchar("loan_due_at", { length: 10 }).default("").notNull(),
+  notes: text("notes").default("").notNull(),
+  version: integer("version").default(1).notNull(),
+  ...timestamps,
+}, (table) => [
+  index("geek_collections_org_updated_idx").on(table.organizationId, table.updatedAt),
+  check("geek_collections_values_check", sql`${table.quantity} > 0 AND ${table.purchasePrice} >= 0 AND ${table.version} > 0`),
+  check("geek_collections_category_check", sql`${table.category} IN ('manga','comic','figure','game','card','other')`),
+  check("geek_collections_status_check", sql`${table.status} IN ('owned','wishlist','ordered','loaned')`),
+  check("geek_collections_loan_check", sql`${table.status} <> 'loaned' OR length(trim(${table.borrower})) > 0`),
+]).enableRLS();
+
+export const geekCommissions = pgTable("geek_commissions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").references(() => organizations.id, { onDelete: "cascade" }).notNull(),
+  title: varchar("title", { length: 240 }).notNull(),
+  category: varchar("category", { length: 24 }).$type<CommissionInput["category"]>().notNull(),
+  customer: varchar("customer", { length: 160 }).notNull(),
+  contact: varchar("contact", { length: 180 }).default("").notNull(),
+  quantity: integer("quantity").default(1).notNull(),
+  status: varchar("status", { length: 24 }).$type<CommissionInput["status"]>().default("quote").notNull(),
+  dueAt: varchar("due_at", { length: 10 }).default("").notNull(),
+  materials: jsonb("materials").$type<CommissionMaterial[]>().default([]).notNull(),
+  laborHours: numeric("labor_hours", { precision: 10, scale: 2 }).default("0").notNull(),
+  hourlyRate: numeric("hourly_rate", { precision: 12, scale: 2 }).default("0").notNull(),
+  extraCosts: numeric("extra_costs", { precision: 12, scale: 2 }).default("0").notNull(),
+  marginPercent: numeric("margin_percent", { precision: 5, scale: 2 }).default("30").notNull(),
+  totalPrice: numeric("total_price", { precision: 12, scale: 2 }).default("0").notNull(),
+  paidAmount: numeric("paid_amount", { precision: 12, scale: 2 }).default("0").notNull(),
+  notes: text("notes").default("").notNull(),
+  version: integer("version").default(1).notNull(),
+  ...timestamps,
+}, (table) => [
+  index("geek_commissions_org_updated_idx").on(table.organizationId, table.updatedAt),
+  check("geek_commissions_category_check", sql`${table.category} IN ('cosplay','craft','print3d','other')`),
+  check("geek_commissions_status_check", sql`${table.status} IN ('quote','approved','production','ready','delivered','canceled')`),
+  check("geek_commissions_values_check", sql`${table.quantity} > 0 AND ${table.laborHours} >= 0 AND ${table.hourlyRate} >= 0 AND ${table.extraCosts} >= 0 AND ${table.totalPrice} >= 0 AND ${table.paidAmount} >= 0 AND ${table.paidAmount} <= ${table.totalPrice} AND ${table.marginPercent} >= 0 AND ${table.marginPercent} <= 95 AND ${table.version} > 0`),
 ]).enableRLS();
 
 export const products = pgTable("products", {
@@ -557,3 +613,109 @@ export const priceChangeHistoryRelations = relations(priceChangeHistory, ({ one 
   inventoryItem: one(inventoryItems, { fields: [priceChangeHistory.inventoryItemId], references: [inventoryItems.id] }),
 }));
 export const priceChangeLogRelations = priceChangeHistoryRelations;
+
+// GeekPrice Index is a shared, platform-owned catalog. Merchant inventory remains
+// isolated in its existing tables and is never populated by collection jobs.
+export const indexCards = pgTable("index_cards", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  game: varchar("game", { length: 16 }).notNull(),
+  catalogSource: varchar("catalog_source", { length: 32 }).notNull(),
+  canonicalId: varchar("canonical_id", { length: 180 }).notNull(),
+  name: varchar("name", { length: 240 }).notNull(),
+  setName: varchar("set_name", { length: 180 }).notNull(),
+  setCode: varchar("set_code", { length: 40 }).notNull(),
+  collectorNumber: varchar("collector_number", { length: 60 }).notNull(),
+  imageUrl: text("image_url"),
+  language: varchar("language", { length: 12 }),
+  finish: varchar("finish", { length: 40 }),
+  condition: varchar("condition", { length: 40 }),
+  matchStatus: varchar("match_status", { length: 20 }).default("exact").notNull(),
+  coverageStatus: varchar("coverage_status", { length: 20 }).default("unpriced").notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("index_cards_identity_uidx").on(table.game, table.catalogSource, table.canonicalId),
+  index("index_cards_lookup_idx").on(table.game, table.setCode, table.collectorNumber),
+  index("index_cards_name_idx").on(table.game, table.name),
+  check("index_cards_game_check", sql`${table.game} IN ('pokemon','magic')`),
+  check("index_cards_match_check", sql`${table.matchStatus} IN ('exact','probable','ambiguous','not_found')`),
+]).enableRLS();
+
+export const indexSources = pgTable("index_sources", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  code: varchar("code", { length: 40 }).notNull().unique(),
+  name: varchar("name", { length: 120 }).notNull(),
+  baseUrl: text("base_url").notNull(),
+  active: boolean("active").default(true).notNull(),
+  commercialApproved: boolean("commercial_approved").default(false).notNull(),
+  acquisitionMethod: varchar("acquisition_method", { length: 40 }),
+  rightsReference: text("rights_reference"),
+  lastSuccessAt: timestamp("last_success_at", { withTimezone: true }),
+  lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+  ...timestamps,
+}).enableRLS();
+
+export const indexImports = pgTable("index_imports", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  sourceId: uuid("source_id").references(() => indexSources.id, { onDelete: "restrict" }).notNull(),
+  fileHash: varchar("file_hash", { length: 64 }).notNull(),
+  fileName: varchar("file_name", { length: 240 }).notNull(),
+  acquisitionMethod: varchar("acquisition_method", { length: 40 }).notNull(),
+  rightsReference: text("rights_reference").notNull(),
+  sourceSnapshotAt: timestamp("source_snapshot_at", { withTimezone: true }).notNull(),
+  totalRows: integer("total_rows").notNull(),
+  validRows: integer("valid_rows").notNull(),
+  pricedRows: integer("priced_rows").notNull(),
+  unpricedRows: integer("unpriced_rows").notNull(),
+  cursor: integer("cursor").default(0).notNull(),
+  status: varchar("status", { length: 20 }).notNull(),
+  errors: jsonb("errors").$type<Array<{ row: number; message: string }>>().default([]).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [uniqueIndex("index_imports_source_file_uidx").on(table.sourceId, table.fileHash), index("index_imports_created_idx").on(table.createdAt)]).enableRLS();
+
+export const indexInventoryLinks = pgTable("index_inventory_links", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").references(() => organizations.id, { onDelete: "cascade" }).notNull(),
+  inventoryItemId: uuid("inventory_item_id").references(() => inventoryItems.id, { onDelete: "cascade" }).notNull(),
+  cardId: uuid("card_id").references(() => indexCards.id, { onDelete: "cascade" }).notNull(),
+  matchStatus: varchar("match_status", { length: 20 }).notNull(),
+  confirmedById: uuid("confirmed_by_id").references(() => users.id, { onDelete: "set null" }),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [uniqueIndex("index_inventory_links_item_uidx").on(table.organizationId, table.inventoryItemId), index("index_inventory_links_card_idx").on(table.cardId)]).enableRLS();
+
+export const indexObservations = pgTable("index_observations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  cardId: uuid("card_id").references(() => indexCards.id, { onDelete: "cascade" }).notNull(),
+  sourceId: uuid("source_id").references(() => indexSources.id, { onDelete: "restrict" }).notNull(),
+  sourceExternalId: varchar("source_external_id", { length: 180 }).notNull(),
+  sourceUrl: text("source_url").notNull(),
+  priceMin: numeric("price_min", { precision: 14, scale: 2 }).notNull(),
+  providerAverage: numeric("provider_average", { precision: 14, scale: 2 }),
+  priceMax: numeric("price_max", { precision: 14, scale: 2 }).notNull(),
+  currency: varchar("currency", { length: 3 }).default("BRL").notNull(),
+  priceType: varchar("price_type", { length: 24 }).default("asking_summary").notNull(),
+  availableQuantity: integer("available_quantity"),
+  language: varchar("language", { length: 12 }),
+  finish: varchar("finish", { length: 40 }),
+  condition: varchar("condition", { length: 40 }),
+  observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull(),
+  fingerprint: varchar("fingerprint", { length: 64 }).notNull().unique(),
+}, (table) => [
+  index("index_observations_card_date_idx").on(table.cardId, table.observedAt),
+  index("index_observations_source_date_idx").on(table.sourceId, table.observedAt),
+  check("index_observations_money_check", sql`${table.priceMin} > 0 AND ${table.priceMax} >= ${table.priceMin} AND (${table.providerAverage} IS NULL OR ${table.providerAverage} > 0)`),
+  check("index_observations_brl_check", sql`${table.currency} = 'BRL'`),
+]).enableRLS();
+
+export const indexRuns = pgTable("index_runs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  sourceId: uuid("source_id").references(() => indexSources.id, { onDelete: "restrict" }).notNull(),
+  status: varchar("status", { length: 20 }).default("running").notNull(),
+  cursor: integer("cursor").default(0).notNull(),
+  searched: integer("searched").default(0).notNull(),
+  priced: integer("priced").default(0).notNull(),
+  errors: integer("errors").default(0).notNull(),
+  startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  lastError: text("last_error"),
+}, (table) => [index("index_runs_source_started_idx").on(table.sourceId, table.startedAt)]).enableRLS();

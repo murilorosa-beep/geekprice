@@ -1,0 +1,10 @@
+# Arte do ateliê de encomendas
+
+- Arquivo final: `public/commissions/maker-studio-hero.webp` (2098 × 749, aproximadamente 238 KB).
+- Ferramenta: habilidade `imagegen`, gerador integrado `image_gen`; sem uso da CLI ou de chaves de API do aplicativo.
+- Banner e capas decorativas por tipo de projeto. Os objetos ilustrados não são fotos das encomendas reais.
+- Etapas, indicadores e valores são controles HTML/CSS e dados reais da organização. Contagens por etapa abrangem toda a conta, sem depender dos filtros e da página atual. A trilha nos cartões mostra a etapa cadastrada, não uma estimativa automática de conclusão. A barra de recebimento usa recebido / combinado.
+
+## Prompt final
+
+Create original premium cinematic website hero artwork for a geek maker commission management app. Ultrawide landscape composition around 2.8:1, luxurious professional creative studio at night. RIGHT TWO THIRDS: an exquisitely detailed tabletop maker workbench with a futuristic fantasy cosplay helmet in dark teal and brushed gold, a small original friendly robot figurine on a round display base, an elegant miniature fantasy castle freshly made by a compact desktop 3D printer behind it, neatly arranged fine brushes, pigment jars, rolls of fabric and a spool of teal filament. A dark sketchbook with faint abstract technical sketches, no writing. Tactile realistic materials, sculpted resin, satin painted surfaces, leather, brass, clean organized tools, handcrafted geek collectibles. LEFT THIRD: quiet very dark navy negative space for a heading to be added later in HTML. Important objects centered vertically so wide cropping is safe. Sophisticated cyan and teal edge lighting with warm amber work lights, restrained violet accents, soft luminous dust, cinematic depth of field and premium advertising product photography. Atmospheric, impressive, richly detailed and beautiful, while appropriate for a professional creative-business software website. No people, no existing fictional characters, no weapons, no lettering, no logos, no captions, no watermark. Artwork only, not a web interface.

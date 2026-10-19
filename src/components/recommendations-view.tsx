@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { RecommendationView } from "@/server/recommendations/service";
 
-const labels = { below_minimum: "Abaixo do mínimo", below_market: "Abaixo do mercado", above_market: "Acima do mercado", no_market: "Sem mercado", competitive: "Competitivo" };
+const labels: Record<RecommendationView["status"], string> = { below_minimum: "Abaixo do mínimo", below_market: "Abaixo do mercado", above_market: "Acima do mercado", no_market: "Sem mercado", competitive: "Competitivo", indicative_reference: "Index BRL (indicativa)" };
 const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
 export function RecommendationsView({ initial }: { initial: RecommendationView[] }) {

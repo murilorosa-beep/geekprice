@@ -1,0 +1,11 @@
+{
+  "source": "MYP Cards public API",
+  "source_documentation": "https://mypcards.com/acesso-api",
+  "observed_at": "2026-10-15T21:57:41.000Z",
+  "observed_at_precision": "collection window, approximately 21:57–22:00 UTC",
+  "queries": ["pokemon/carta/Charizard", "pokemon/carta/Pikachu", "magic/carta/Lightning Bolt", "magic/carta/Counterspell"],
+  "selected_cards": { "pokemon": 50, "magic": 20 },
+  "price_type": "asking_summary",
+  "language_finish_condition": "not provided by the API search response",
+  "note": "The snapshot contains provider supplied minimum, average and maximum asking prices in BRL. It is not a record of completed sales or individual listings. Duplicate card codes were removed."
+}
